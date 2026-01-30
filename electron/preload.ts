@@ -33,6 +33,7 @@ type StartRunArgs = {
   role: 'planning' | 'implementation' | 'testing' | 'generic'
   profileId: 'careful' | 'yolo'
   model?: string
+  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   input: string | Array<{ type: 'text'; text: string } | { type: 'local_image'; path: string }>
   outputSchema?: unknown
   oneShotNetwork?: boolean
@@ -43,12 +44,31 @@ type RunEventPayload = {
   event: unknown
 }
 
+type CodexModelInfo = {
+  model: string
+  displayName: string
+  description: string
+  isDefault: boolean
+}
+
 const api = {
+  setWindowTitle(title: string): Promise<boolean> {
+    return ipcRenderer.invoke('codex-designer:set-window-title', title)
+  },
   pickWorkspace(): Promise<PickWorkspaceResult> {
     return ipcRenderer.invoke('codex-designer:pick-workspace')
   },
   getAppState(): Promise<AppState> {
     return ipcRenderer.invoke('codex-designer:get-app-state')
+  },
+  listModels(): Promise<CodexModelInfo[]> {
+    return ipcRenderer.invoke('codex-designer:list-models')
+  },
+  getClipboardFormats(): Promise<string[]> {
+    return ipcRenderer.invoke('codex-designer:get-clipboard-formats')
+  },
+  readClipboardImageDataUrl(): Promise<string | null> {
+    return ipcRenderer.invoke('codex-designer:read-clipboard-image-data-url')
   },
   openWorkspace(workspacePath: string): Promise<WorkspaceSummary> {
     return ipcRenderer.invoke('codex-designer:open-workspace', workspacePath)
@@ -86,6 +106,9 @@ const api = {
     relPath: string
   }> {
     return ipcRenderer.invoke('codex-designer:save-attachment', args)
+  },
+  readAttachmentDataUrl(workspacePath: string, relPath: string): Promise<string> {
+    return ipcRenderer.invoke('codex-designer:read-attachment-data-url', { workspacePath, relPath })
   },
   getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string> {
     return ipcRenderer.invoke('codex-designer:get-git-diff-stat', { workspacePath, fromCommit })

@@ -74,6 +74,7 @@ Q: What does “Implement it from the interface” mean for v1?
 - B) Run + show proposed diff(s) + require explicit “Apply” confirmation
 - C) Generate patch files only; user applies manually
 A: Actually run codex with the $implement-plan skill on the plan file that has been generated as a result of the back and forth.
+A: Use deterministic prompts (based on the skill guidance) so the app does not require the skill to be installed; still run via Codex SDK and keep `docs/[feature].impl.md` as the implementation log.
 
 Q: During implementation runs, should codex-designer be allowed to run shell commands in the workspace?
 - A) Yes, but with step-level approvals shown in UI

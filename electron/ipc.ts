@@ -1,8 +1,9 @@
-import { dialog, ipcMain } from 'electron'
+import { BrowserWindow, app, clipboard, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { gitCommitAll, gitDiff, gitDiffStat, gitHeadCommit, gitInit, gitStatusPorcelain, isGitRepo } from './lib/git'
 import { updateGitignore } from './lib/gitignore'
+import { listCodexModels } from './lib/codexModels'
 import { CodexRunManager, type StartRunArgs } from './lib/codexRuns'
 import { RunLogStore } from './lib/runLogs'
 import { writeJsonFileAtomic } from './lib/fs'
@@ -31,8 +32,38 @@ export function registerIpcHandlers() {
   const runs = new CodexRunManager()
   const runLogs = new RunLogStore()
 
+  ipcMain.handle('codex-designer:set-window-title', async (event, title: string): Promise<boolean> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    const safe = String(title ?? '').slice(0, 200)
+    win.setTitle(safe || 'codex-designer')
+    return true
+  })
+
   ipcMain.handle('codex-designer:get-app-state', async () => {
     return userData.read()
+  })
+
+  ipcMain.handle('codex-designer:list-models', async () => {
+    return listCodexModels({ clientName: 'codex-designer', clientVersion: app.getVersion() })
+  })
+
+  ipcMain.handle('codex-designer:get-clipboard-formats', async () => {
+    try {
+      return clipboard.availableFormats() ?? []
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('codex-designer:read-clipboard-image-data-url', async (): Promise<string | null> => {
+    try {
+      const img = clipboard.readImage()
+      if (!img || img.isEmpty()) return null
+      return img.toDataURL()
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle('codex-designer:pick-workspace', async () => {
@@ -240,6 +271,34 @@ export function registerIpcHandlers() {
       const buf = Buffer.from(args.bytesBase64, 'base64')
       await fs.writeFile(absPath, buf)
       return { relPath }
+    }
+  )
+
+  ipcMain.handle(
+    'codex-designer:read-attachment-data-url',
+    async (_event, args: { workspacePath: string; relPath: string }): Promise<string> => {
+      const abs = resolveInside(args.workspacePath, args.relPath)
+      const buf = await fs.readFile(abs)
+      const ext = path.extname(args.relPath).replace('.', '').toLowerCase()
+      const mime =
+        ext === 'png'
+          ? 'image/png'
+          : ext === 'jpg' || ext === 'jpeg'
+            ? 'image/jpeg'
+            : ext === 'gif'
+              ? 'image/gif'
+              : ext === 'webp'
+                ? 'image/webp'
+                : ext === 'bmp'
+                  ? 'image/bmp'
+                  : ext === 'tif' || ext === 'tiff'
+                    ? 'image/tiff'
+                    : ext === 'avif'
+                      ? 'image/avif'
+                      : ext === 'heic'
+                        ? 'image/heic'
+                        : 'application/octet-stream'
+      return `data:${mime};base64,${buf.toString('base64')}`
     }
   )
 

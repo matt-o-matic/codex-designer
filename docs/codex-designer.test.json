@@ -1,0 +1,528 @@
+{
+  "version": 1,
+  "featureSlug": "codex-designer",
+  "generatedAt": "2026-01-28T14:56:54.230Z",
+  "tests": [
+    {
+      "id": "CDX-MAN-001",
+      "title": "Create Workspace + New Work Session (Artifacts Created)",
+      "description": "Verify workspace selection/creation works and that planning artifacts are written under the target workspace `docs/` folder (auto-created if missing).",
+      "steps": [
+        "Launch `codex-designer`.",
+        "In the workspace picker, choose an empty folder (or create a new folder) as the workspace.",
+        "Confirm `docs/` is created automatically if it doesn’t exist.",
+        "Start a new work session (e.g., New feature) with a feature slug like `smoke-feature` and enter a brief.",
+        "Trigger the initial planning action that generates artifacts (e.g., first Q&A round / plan generation).",
+        "On disk, verify `docs/smoke-feature.plan.md` and `docs/smoke-feature.qna.md` exist in the workspace and are non-empty."
+      ],
+      "expected": "A new session is created and the workspace contains `docs/[feature].plan.md` and `docs/[feature].qna.md` (with `docs/` auto-created if missing).",
+      "tags": [
+        "workspace",
+        "artifacts",
+        "planning"
+      ]
+    },
+    {
+      "id": "CDX-MAN-002",
+      "title": "Q&A Rounds Append and Update Plan (2+ Rounds)",
+      "description": "Verify structured Q&A supports multiple rounds and that `docs/[feature].qna.md` is append-only while the plan updates and remains the implementation source of truth.",
+      "steps": [
+        "Open the feature session’s Q&A screen.",
+        "Answer Round 1 questions using both choice options and freeform text.",
+        "Generate the next round (Round 2).",
+        "Verify `docs/[feature].qna.md` contains both Round 1 and Round 2 (Round 1 content is not rewritten).",
+        "Open the plan view and confirm `docs/[feature].plan.md` updates after Round 2 and the UI shows a diff/“since last round” indicator.",
+        "Edit the plan in the UI (add a small line) and confirm the change is written back to `docs/[feature].plan.md` on disk."
+      ],
+      "expected": "Q&A rounds append to `docs/[feature].qna.md`; the plan updates and edits persist to `docs/[feature].plan.md`.",
+      "tags": [
+        "qna",
+        "planning",
+        "artifacts"
+      ]
+    },
+    {
+      "id": "CDX-MAN-003",
+      "title": "Pre-Implementation Answer Edit Creates Appended Correction (No History Rewrite)",
+      "description": "Verify editing prior answers is allowed only before implementation and that edits are recorded as appended corrections (audit trail), with explicit plan regeneration required.",
+      "steps": [
+        "Before starting any implementation run, edit an earlier Q&A answer from a prior round in the UI.",
+        "Confirm the UI indicates the change will be recorded as a correction (append-only) rather than rewriting history.",
+        "Save the change.",
+        "Verify `docs/[feature].qna.md` still contains the original answer text and that the correction is appended (no prior content overwritten).",
+        "Confirm the UI shows the “current answer” as the latest correction and shows answer history (expanded by default).",
+        "Confirm the plan is not auto-regenerated and the UI indicates plan/Q&A are out of sync until you click `Regenerate plan`.",
+        "Verify `.codex-designer/cache/state.json` exists and reflects that Q&A is newer than the last plan regeneration (e.g., updated round/hash metadata)."
+      ],
+      "expected": "Corrections are appended to `docs/[feature].qna.md`, the plan is not regenerated automatically, and plan/Q&A sync state is tracked in `.codex-designer/cache/state.json`.",
+      "tags": [
+        "qna",
+        "corrections",
+        "plan",
+        "state"
+      ]
+    },
+    {
+      "id": "CDX-MAN-004",
+      "title": "Warn at 10 Q&A Rounds and Allow Override",
+      "description": "Verify the app warns when approaching/exceeding ~10 rounds but allows the user to override and continue.",
+      "steps": [
+        "In a feature session, generate Q&A rounds until you reach Round 10.",
+        "Attempt to generate Round 11.",
+        "Confirm a warning is shown about exceeding ~10 rounds and an override option is available.",
+        "Choose the override and proceed.",
+        "Verify `docs/[feature].qna.md` now contains a Round 11 entry."
+      ],
+      "expected": "The app warns at ~10 rounds and allows an explicit override; the Q&A log reflects the additional round.",
+      "tags": [
+        "qna",
+        "limits"
+      ]
+    },
+    {
+      "id": "CDX-MAN-005",
+      "title": "Clipboard Image Attachment Stored Under docs/assets and Linked",
+      "description": "Verify pasted images are accepted and stored under `docs/assets/[feature]/...` with no enforced limits, and are associated with the session and referenced from artifacts.",
+      "steps": [
+        "Copy an image to the clipboard (e.g., a screenshot).",
+        "Paste the image into the brief, a Q&A answer, or other attachment-capable field.",
+        "Confirm the UI displays the attachment (thumbnail/chip) in the session.",
+        "On disk, verify an image file was created under `docs/assets/[feature]/...` in the workspace.",
+        "Verify the relevant artifact references the attachment path (e.g., in `docs/[feature].qna.md`, `docs/[feature].impl.md`, or `docs/[feature].test.json` depending on where it was attached)."
+      ],
+      "expected": "The pasted image is saved under `docs/assets/[feature]/...`, remains associated with the session, and is referenced from persisted artifacts.",
+      "tags": [
+        "attachments",
+        "clipboard",
+        "artifacts"
+      ]
+    },
+    {
+      "id": "CDX-MAN-006",
+      "title": "Careful/YOLO Preset Mappings + Advanced Settings Apply to Next Run",
+      "description": "Verify presets map to the specified sandbox/approval/network settings and that advanced settings are configurable and affect the next Codex run.",
+      "steps": [
+        "Open run profile selector and choose `Careful`.",
+        "Open Advanced settings and confirm the effective mapping shows `sandbox=workspace-write`, `approval=on-failure`, `network=off`, plus model and working directory controls.",
+        "Trigger a Codex-backed run (e.g., generate next Q&A round or regenerate plan).",
+        "Switch to `YOLO` and confirm the effective mapping shows `sandbox=danger-full-access`, `approval=never`, `network=on`.",
+        "Trigger the same Codex-backed run again and confirm the run summary/config reflects the new preset.",
+        "(Optional) In `network=off`, run a flow that would try a networked tool/command and confirm tool-network is blocked while model calls still occur."
+      ],
+      "expected": "Careful/YOLO presets match the specified mappings and advanced settings apply to subsequent runs; `network=off` blocks tool/executed-command network access without preventing model calls.",
+      "tags": [
+        "profiles",
+        "permissions",
+        "careful",
+        "yolo"
+      ]
+    },
+    {
+      "id": "CDX-MAN-007",
+      "title": "Export/Import Run Profiles and Workspace Share/Cache Gitignore Strategy",
+      "description": "Verify profiles can be exported/imported per workspace to `.codex-designer/share/profiles.json`, and that `.codex-designer/cache/` is always gitignored while shareability is user-chosen.",
+      "steps": [
+        "In workspace settings, choose `Local only` vs `Shareable in repo` for `.codex-designer/share/` when prompted.",
+        "Export run profiles for the workspace.",
+        "Verify `.codex-designer/share/profiles.json` exists and contains the exported profiles.",
+        "Verify `.codex-designer/cache/` is always gitignored (via `.gitignore` update or an explicit UI indicator).",
+        "If `Local only` was chosen, verify `.codex-designer/share/` is gitignored; if `Shareable in repo` was chosen, verify it is not gitignored.",
+        "Import profiles from `.codex-designer/share/profiles.json` and confirm profile names/mappings round-trip correctly."
+      ],
+      "expected": "Profiles export/import works via `.codex-designer/share/profiles.json`, `.codex-designer/cache/` is always gitignored, and `.codex-designer/share/` gitignore behavior matches the selected shareability.",
+      "tags": [
+        "profiles",
+        "storage",
+        "gitignore"
+      ]
+    },
+    {
+      "id": "CDX-MAN-008",
+      "title": "Prompt git init for Non-Git Workspace Before Implementation",
+      "description": "Verify the app prompts to initialize git when a workspace is not a repo, before allowing implementation runs.",
+      "steps": [
+        "Select or create a workspace folder that does not contain a `.git/` directory.",
+        "Start an implementation run from the Implementation screen.",
+        "Confirm the app prompts to run `git init` before proceeding.",
+        "Accept the prompt.",
+        "Verify `.git/` now exists in the workspace.",
+        "Retry the implementation run and confirm it proceeds to the next safety checks (e.g., clean working tree requirement)."
+      ],
+      "expected": "Implementation is gated by git initialization: the app prompts for `git init`, performs it on acceptance, and then continues with implementation safety checks.",
+      "tags": [
+        "git",
+        "workspace",
+        "implementation"
+      ]
+    },
+    {
+      "id": "CDX-MAN-009",
+      "title": "Implementation Safety: Dirty Working Tree Blocks; Clean Tree Records Checkpoint Anchor",
+      "description": "Verify implementation is blocked when git working tree is dirty and that when clean, the app records current `HEAD` as the checkpoint anchor (no empty checkpoint commit).",
+      "steps": [
+        "In a git workspace, create an uncommitted change outside the app (modify any file without committing).",
+        "Attempt to start an implementation run.",
+        "Confirm the app blocks the run and instructs you to clean the working tree manually (no auto-staging/commit).",
+        "Clean the working tree (commit or discard changes) so `git status` is clean.",
+        "Start the implementation run again.",
+        "Confirm the app records the current `HEAD` as the checkpoint anchor and does not create an empty checkpoint commit.",
+        "Confirm the diff view is based on that checkpoint anchor for the run."
+      ],
+      "expected": "Dirty trees block implementation; clean trees allow it, using recorded `HEAD` as a checkpoint anchor without creating empty commits.",
+      "tags": [
+        "git",
+        "safety",
+        "checkpoint"
+      ]
+    },
+    {
+      "id": "CDX-MAN-010",
+      "title": "Implementation Run UX: Streamed Logs, Diff via Git, impl.md Updates, No Auto-Commit, Stop",
+      "description": "Verify implementation runs stream events, diffs are shown via git from checkpoint anchor, `docs/[feature].impl.md` updates, no auto-commit occurs, and Stop interrupts runs safely (with warnings).",
+      "steps": [
+        "Ensure the workspace is a clean git repo and the plan is ready.",
+        "Start an implementation run for the feature plan.",
+        "Verify logs/events stream in real time in the UI timeline.",
+        "After completion, open changed-files and diff views and confirm they align with `git diff <checkpoint>..HEAD`.",
+        "Verify `docs/[feature].impl.md` exists and contains new content from this run.",
+        "Confirm no commit was created automatically after the run.",
+        "Start a second run intended to take long enough to interrupt (e.g., a larger task).",
+        "Click `Stop` during the run.",
+        "Confirm the run is marked interrupted and the UI warns the workspace may be left dirty."
+      ],
+      "expected": "Runs stream live updates, diffs are computed from the checkpoint anchor via git, `docs/[feature].impl.md` is updated, no auto-commit happens, and Stop marks the run interrupted with appropriate warnings.",
+      "tags": [
+        "implementation",
+        "streaming",
+        "diff",
+        "stop"
+      ]
+    },
+    {
+      "id": "CDX-MAN-011",
+      "title": "Plan/Q&A Consistency Gating: Careful Blocks, YOLO Warns",
+      "description": "Verify that when Q&A is newer than the last plan regeneration, implementation is blocked in Careful but allowed with warning in YOLO.",
+      "steps": [
+        "Generate a plan from the current Q&A (baseline synced state).",
+        "Append a new Q&A answer or correction without regenerating the plan.",
+        "Switch to `Careful` preset and attempt to start implementation.",
+        "Confirm the app blocks implementation and requires you to regenerate the plan first.",
+        "Switch to `YOLO` preset and attempt to start implementation again.",
+        "Confirm the app shows a warning about plan/Q&A mismatch but allows proceeding."
+      ],
+      "expected": "Careful enforces plan/Q&A sync by blocking implementation; YOLO allows proceeding with an explicit warning.",
+      "tags": [
+        "plan",
+        "gating",
+        "careful",
+        "yolo"
+      ]
+    },
+    {
+      "id": "CDX-MAN-012",
+      "title": "Careful One-Shot Tool-Network Override Applies to Exactly One Run",
+      "description": "Verify Careful supports a one-run-only override to enable tool/executed-command network access, with a clear warning, and that it resets automatically after the run.",
+      "steps": [
+        "Select `Careful` preset.",
+        "Enable the one-shot override for tool-network for the next run and confirm a prominent warning banner is shown.",
+        "Start a run that would normally require tool-network access.",
+        "Confirm tool-network access is enabled for that run.",
+        "After the run finishes, verify the one-shot override has reset to off.",
+        "Start another run and confirm it uses `network=off` unless the override is re-enabled."
+      ],
+      "expected": "One-shot override is clearly warned, applies to exactly one run, and automatically resets afterward.",
+      "tags": [
+        "careful",
+        "override",
+        "network"
+      ]
+    },
+    {
+      "id": "CDX-MAN-013",
+      "title": "Unsupported Advanced Settings: Warn, Require Confirmation, Run Best-Effort (SDK Only)",
+      "description": "Verify that when a requested advanced setting can’t be applied due to SDK limitations, the app warns, requires confirmation, and runs best-effort without silently falling back to CLI.",
+      "steps": [
+        "In Advanced settings, select an option/combination the app indicates is not supported by the current `@openai/codex-sdk` capabilities.",
+        "Start the run.",
+        "Confirm the app warns that the setting can’t be fully applied and requires explicit confirmation to continue.",
+        "Confirm the run proceeds using best-effort settings.",
+        "Confirm the run summary indicates which settings were applied vs ignored, and that there was no transparent CLI fallback."
+      ],
+      "expected": "Unsupported settings trigger a warning + confirmation gate; the run proceeds best-effort via SDK only with clear transparency.",
+      "tags": [
+        "sdk",
+        "advanced",
+        "warning"
+      ]
+    },
+    {
+      "id": "CDX-MAN-014",
+      "title": "Testing Checklist Generation Produces JSON Mini-DB + Markdown Export",
+      "description": "Verify the Testing module generates editable key tests into `docs/[feature].test.json` and produces a readable `docs/[feature].test.md` export.",
+      "steps": [
+        "Open the Testing module for a feature session.",
+        "Generate `key features to test`.",
+        "Verify `docs/[feature].test.json` and `docs/[feature].test.md` are created/updated on disk.",
+        "Edit a test item (title/steps/expected) in the UI and save.",
+        "Verify both `docs/[feature].test.json` and `docs/[feature].test.md` reflect the edit."
+      ],
+      "expected": "Testing checklist is generated into `docs/[feature].test.json` and exported to `docs/[feature].test.md`; edits persist to both outputs.",
+      "tags": [
+        "testing",
+        "artifacts",
+        "export"
+      ]
+    },
+    {
+      "id": "CDX-MAN-015",
+      "title": "Testing Rounds: Statuses, Deferral, Per-Round Feedback + Attachments Persist",
+      "description": "Verify testing rounds are tracked with full per-round history in JSON, allowed statuses are enforced, deferrals reappear next round, and feedback (text+images) is stored per-round.",
+      "steps": [
+        "Click `Start testing round` and confirm a new round is created in `docs/[feature].test.json`.",
+        "Set three different items to `pass`, `fail`, and `deferred` using the `defer this round` checkbox.",
+        "Add feedback text and paste an image attachment for the failed item.",
+        "Verify the attachment file is stored under `docs/assets/[feature]/...`.",
+        "Restart the app and reopen the same session.",
+        "Confirm round statuses persist, feedback is stored per-round, and the attachment reference remains valid.",
+        "Start the next testing round and confirm deferred items reappear for the new round (not evaluated in the prior round)."
+      ],
+      "expected": "Testing rounds and per-round statuses/feedback persist in `docs/[feature].test.json`; deferred items reappear in the next round; attachments are stored in `docs/assets/[feature]/...`.",
+      "tags": [
+        "testing",
+        "rounds",
+        "deferral",
+        "attachments"
+      ]
+    },
+    {
+      "id": "CDX-MAN-016",
+      "title": "Auto-Create New Testing Round After Code Changes + Status Carryover Rules",
+      "description": "Verify a new testing round auto-creates after an implementation run when there were code changes and at least one test is not `pass`, and that status initialization follows the specified rules.",
+      "steps": [
+        "Ensure the current testing round has at least one item that is not `pass` (e.g., `fail`, `blocked`, or `deferred`).",
+        "Run an implementation that changes files in the workspace.",
+        "Confirm the app auto-creates a new testing round after the run completes.",
+        "Verify the new round resets previously `pass` → `not_run`.",
+        "Verify `fail`/`deferred`/`blocked` carry forward unchanged into the new round.",
+        "Verify prior rounds remain accessible in history in `docs/[feature].test.json`."
+      ],
+      "expected": "After code changes with not-all-pass tests, a new testing round is auto-created; `pass` resets to `not_run` and other non-pass statuses carry forward; history is preserved.",
+      "tags": [
+        "testing",
+        "rounds",
+        "automation"
+      ]
+    },
+    {
+      "id": "CDX-MAN-017",
+      "title": "Acceptance + Commit Accepted Changes (Careful Gating vs YOLO Override)",
+      "description": "Verify acceptance gates committing in Careful (pass or deferred only), while YOLO permits manual override; commit stages and commits all changes with an editable auto-generated message.",
+      "steps": [
+        "In `Careful`, ensure at least one key test is `fail`, `blocked`, or `not_run`.",
+        "Confirm acceptance is not met and `Commit accepted changes` is disabled/blocked.",
+        "Update tests so all key items are `pass` or `deferred`.",
+        "Confirm acceptance is met and `Commit accepted changes` becomes enabled.",
+        "Click `Commit accepted changes` and confirm it stages and commits all changes in the repo.",
+        "Confirm the commit message is auto-generated but editable before finalizing.",
+        "Switch to `YOLO` with failing/unrun tests and confirm committing is still possible via an explicit override, with a warning shown."
+      ],
+      "expected": "Careful gates commit on acceptance (pass or deferred only); YOLO can override with warning; commit stages+commits all changes and message is editable.",
+      "tags": [
+        "acceptance",
+        "commit",
+        "git",
+        "careful",
+        "yolo"
+      ]
+    },
+    {
+      "id": "CDX-MAN-018",
+      "title": "Implement Feedback Loop Uses Failed-Test Context and Resumes or Recaps Session",
+      "description": "Verify `Implement feedback` launches a fix run using failing-test context and attempts to resume the implementation session; if resume isn’t possible, it starts a new run with a structured recap and links to prior artifacts/logs.",
+      "steps": [
+        "Mark a key test as `fail` and add detailed feedback (text and optionally an image).",
+        "Click `Implement feedback`.",
+        "Confirm the app starts/resumes an implementation run and includes the failing test context in the run inputs.",
+        "If session resume is unavailable, confirm fallback behavior: a new run starts with a structured recap and references to prior artifacts/logs.",
+        "After the run, verify `docs/[feature].impl.md` is updated and you can proceed to re-test via the Testing module."
+      ],
+      "expected": "Implement feedback starts a fix-focused run that includes failed-test context, resumes when possible, and otherwise uses a recap-based fallback; implementation notes update accordingly.",
+      "tags": [
+        "implementation",
+        "feedback",
+        "testing",
+        "resume"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "round-1",
+      "startedAt": "2026-01-28T14:56:54.230Z",
+      "results": {
+        "CDX-MAN-001": {
+          "status": "pass",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-002": {
+          "status": "pass",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-003": {
+          "status": "pass",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-004": {
+          "status": "fail",
+          "feedback": [
+            {
+              "text": "no warning displayed on round 10, 11, 12, etc",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-005": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-006": {
+          "status": "pass",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-007": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-008": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-009": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-010": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-011": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-012": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-013": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-014": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-015": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-016": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-017": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        },
+        "CDX-MAN-018": {
+          "status": "not_run",
+          "feedback": [
+            {
+              "text": "",
+              "attachments": []
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

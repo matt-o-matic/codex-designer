@@ -3,12 +3,23 @@ export {}
 declare global {
   interface Window {
     codexDesigner?: {
+      setWindowTitle(title: string): Promise<boolean>
       pickWorkspace(): Promise<string | null>
       getAppState(): Promise<{
         version: 1
         activeWorkspacePath?: string
         recentWorkspacePaths: string[]
       }>
+      listModels(): Promise<
+        Array<{
+          model: string
+          displayName: string
+          description: string
+          isDefault: boolean
+        }>
+      >
+      getClipboardFormats(): Promise<string[]>
+      readClipboardImageDataUrl(): Promise<string | null>
       openWorkspace(workspacePath: string): Promise<{
         path: string
         isGitRepo: boolean
@@ -74,6 +85,7 @@ declare global {
         role: 'planning' | 'implementation' | 'testing' | 'generic'
         profileId: 'careful' | 'yolo'
         model?: string
+        modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
         input:
           | string
           | Array<{ type: 'text'; text: string } | { type: 'local_image'; path: string }>
@@ -90,6 +102,7 @@ declare global {
         ext: string
         bytesBase64: string
       }): Promise<{ relPath: string }>
+      readAttachmentDataUrl(workspacePath: string, relPath: string): Promise<string>
       getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string>
       getGitDiff(workspacePath: string, fromCommit: string): Promise<string>
       gitCommitAll(

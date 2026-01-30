@@ -1,11 +1,16 @@
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   active: string
+  open?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'navigate', path: string): void
 }>()
+
+const isOpen = computed(() => props.open !== false)
 
 function nav(path: string) {
   emit('navigate', path)
@@ -23,30 +28,40 @@ function itemClass(path: string, active: string) {
 </script>
 
 <template>
-  <aside class="hidden w-64 flex-none border-r border-gray-200 p-4 dark:border-gray-800 md:block">
-    <div class="space-y-2">
-      <button :class="itemClass('/workspace', active)" type="button" @click="nav('/workspace')">
-        <span class="material-symbols-rounded text-[18px]">folder_open</span>
-        Workspace
-      </button>
-      <button :class="itemClass('/session', active)" type="button" @click="nav('/session')">
-        <span class="material-symbols-rounded text-[18px]">chat</span>
-        Sessions
-      </button>
-      <button :class="itemClass('/settings', active)" type="button" @click="nav('/settings')">
-        <span class="material-symbols-rounded text-[18px]">tune</span>
-        Settings
-      </button>
-    </div>
-
-    <div class="mt-6 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-      <div class="flex items-center gap-2 font-black text-gray-900 dark:text-gray-100">
-        <span class="material-symbols-rounded text-[18px] text-brand-500">tips_and_updates</span>
-        House Style
+  <aside
+    class="hidden flex-none overflow-hidden transition-[width,padding] duration-200 md:block"
+    :class="
+      isOpen
+        ? 'w-64 border-r border-gray-200 p-4 dark:border-gray-800'
+        : 'w-0 border-r-0 p-0'
+    "
+    aria-label="Navigation"
+  >
+    <div v-if="isOpen">
+      <div class="space-y-2">
+        <button :class="itemClass('/workspace', props.active)" type="button" @click="nav('/workspace')">
+          <span class="material-symbols-rounded text-[18px]">folder_open</span>
+          Workspace
+        </button>
+        <button :class="itemClass('/session', props.active)" type="button" @click="nav('/session')">
+          <span class="material-symbols-rounded text-[18px]">chat</span>
+          Sessions
+        </button>
+        <button :class="itemClass('/settings', props.active)" type="button" @click="nav('/settings')">
+          <span class="material-symbols-rounded text-[18px]">tune</span>
+          Settings
+        </button>
       </div>
-      <p class="mt-2 leading-relaxed">
-        Dark-mode-first, material-inspired surfaces, soft borders, and crisp focus states.
-      </p>
+
+      <div class="mt-6 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+        <div class="flex items-center gap-2 font-black text-gray-900 dark:text-gray-100">
+          <span class="material-symbols-rounded text-[18px] text-brand-500">tips_and_updates</span>
+          House Style
+        </div>
+        <p class="mt-2 leading-relaxed">
+          Dark-mode-first, material-inspired surfaces, soft borders, and crisp focus states.
+        </p>
+      </div>
     </div>
   </aside>
 </template>

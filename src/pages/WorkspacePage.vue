@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
 
 const {
@@ -12,6 +13,8 @@ const {
   setWorkspaceShareability,
   initGit,
 } = useAppState()
+
+const router = useRouter()
 
 const recent = computed(() => appState.value?.recentWorkspacePaths ?? [])
 
@@ -117,14 +120,18 @@ async function chooseWorkspace() {
   }
 }
 
+function openFeature(slug: string) {
+  router.push(`/session/${encodeURIComponent(slug)}?tab=planning`)
+}
+
 onMounted(() => {
   refreshAppState()
 })
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+  <div class="space-y-4">
+    <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">folder</span>
         <div class="min-w-0">
@@ -166,7 +173,7 @@ onMounted(() => {
 
     <div
       v-if="recent.length"
-      class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
     >
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">history</span>
@@ -193,7 +200,7 @@ onMounted(() => {
 
     <div
       v-if="activeWorkspace"
-      class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
     >
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">hub</span>
@@ -335,10 +342,13 @@ onMounted(() => {
         </div>
 
         <div v-if="activeWorkspace.features.length" class="mt-3 grid gap-2">
-          <div
+          <button
             v-for="f in activeWorkspace.features"
             :key="f.slug"
-            class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-900"
+            class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left text-sm shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-900 dark:hover:bg-gray-800"
+            type="button"
+            :disabled="loading"
+            @click="openFeature(f.slug)"
           >
             <div class="min-w-0">
               <div class="truncate font-black">{{ f.slug }}</div>
@@ -347,7 +357,7 @@ onMounted(() => {
               </div>
             </div>
             <span class="material-symbols-rounded text-[18px] text-gray-400">chevron_right</span>
-          </div>
+          </button>
         </div>
 
         <div v-else class="mt-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-600 dark:bg-gray-900 dark:text-gray-300">
@@ -359,7 +369,7 @@ onMounted(() => {
     <!-- Profiles modal -->
     <div v-if="profilesOpen" class="fixed inset-0 z-50">
       <button class="absolute inset-0 bg-black/50" type="button" @click="profilesOpen = false"></button>
-      <div class="absolute left-1/2 top-1/2 w-[min(780px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
+      <div class="absolute left-1/2 top-1/2 w-[min(780px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-gray-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
         <div class="flex items-start justify-between gap-3">
           <div>
             <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Profiles</div>

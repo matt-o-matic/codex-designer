@@ -1,0 +1,1915 @@
+{
+  "version": 1,
+  "featureSlug": "codex-designer",
+  "updatedAt": "2026-01-29T04:43:28.758Z",
+  "rounds": [
+    {
+      "id": "round-1",
+      "title": "Round 1",
+      "questions": [
+        {
+          "id": "r1-q1",
+          "prompt": "What should the first deliverable be?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Electron desktop app (best FS + process spawning + clipboard)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Local web app (Node backend + browser UI)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Start as local web app, then package via Electron later",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q2",
+          "prompt": "How should the tool “run Codex” under the hood?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Spawn `codex` CLI as a subprocess and stream its output into the UI",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Call an AI provider API directly (OpenAI/etc) and implement our own “skills” runner",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Hybrid: planning via direct API, implementation via `codex` subprocess",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Use the Codex SDK and CLI when needed.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q3",
+          "prompt": "If spawning `codex`, should we assume it’s already installed on the machine?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes, external dependency is fine",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No, bundle it / vendor it",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Not sure yet",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q4",
+          "prompt": "Which “mode” and “permissions” do you want exposed in the UI?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Mirror Codex concepts (e.g. approval policy, sandbox mode, network access)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "App-specific presets (Safe / Normal / Full access) that map to Codex settings internally",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both (advanced panel)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q5",
+          "prompt": "Which model sources should be supported initially?",
+          "options": [
+            {
+              "key": "A",
+              "text": "OpenAI only",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "OpenAI + Azure OpenAI",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "OpenAI + “any OpenAI-compatible” endpoint",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q6",
+          "prompt": "Where should codex-designer store its markdown artifacts by default?",
+          "options": [
+            {
+              "key": "A",
+              "text": "In the target workspace under `docs/`",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "In a repo-local hidden folder (e.g. `.codex-designer/`) and optionally export to `docs/`",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "In a global folder (e.g. `~/.codex-designer/`) with links back to the repo",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "- also offer to run git init on a new folder",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q7",
+          "prompt": "Should codex-designer create `docs/` if missing, or ask first?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Create automatically",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Ask / require confirmation per workspace",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q8",
+          "prompt": "Do you want the UI to enforce a hard cap of 10 rounds, or just warn?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Hard cap",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Warn + allow override",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q9",
+          "prompt": "Should users be able to edit prior answers after moving to the next round?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (with explicit “reopen round” and regenerate plan)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (append-only, but allow new clarifications)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Yes, but only before implementation starts",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q10",
+          "prompt": "What does “Implement it from the interface” mean for v1?",
+          "options": [
+            {
+              "key": "A",
+              "text": "One-button run that applies changes immediately",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Run + show proposed diff(s) + require explicit “Apply” confirmation",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Generate patch files only; user applies manually",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Actually run codex with the $implement-plan skill on the plan file that has been generated as a result of the back and forth.",
+              "attachments": []
+            },
+            {
+              "id": "rev-2",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Use deterministic prompts (based on the skill guidance) so the app does not require the skill to be installed; still run via Codex SDK and keep `docs/[feature].impl.md` as the implementation log.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q11",
+          "prompt": "During implementation runs, should codex-designer be allowed to run shell commands in the workspace?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes, but with step-level approvals shown in UI",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Yes, no prompts (power-user)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No, file edits only",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "wrap codex sdk -- let codex do the actual work. don't try and implement codex from scratch, this is meant to be a layer on top to make it easier, not a full-fledged replacement. this allows users to use their own chatgpt logins, etc.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q12",
+          "prompt": "How should “key features to test” be represented?",
+          "options": [
+            {
+              "key": "A",
+              "text": "A markdown checklist file in `docs/` (e.g. `docs/[feature].test.md`)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "A structured JSON file + an optional markdown export",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Stored only in the app state (not ideal, but simplest)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "A and B -- JSON should be edited and used as a mini-db --- markdown for user readability",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q13",
+          "prompt": "How should deferrals work?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Per test item, with a “defer until round N” field",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Per test item, with freeform “blocked by …” notes and no fixed round number",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Just a checkbox to defer for that current round.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q14",
+          "prompt": "Where should pasted images be stored?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Under the workspace (e.g. `docs/assets/[feature]/...`)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Under a repo-local app folder (e.g. `.codex-designer/attachments/...`)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Under a global app folder (e.g. `~/.codex-designer/attachments/...`)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q15",
+          "prompt": "Any constraints we should enforce?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Max image size (MB): ___",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Strip metadata (EXIF) on import: Yes/No",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Allowed types: PNG/JPG/WebP/…",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "No restrictions for now.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q16",
+          "prompt": "Any strong preferences for the UI stack?",
+          "options": [
+            {
+              "key": "A",
+              "text": "React + Tailwind (+ Headless UI)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Vue + Tailwind",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Svelte + Tailwind",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q17",
+          "prompt": "Icon set preference?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Heroicons",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Lucide",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Material Symbols",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "C (primary with A as a fallback)",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-2",
+      "title": "Round 2",
+      "questions": [
+        {
+          "id": "r2-q1",
+          "prompt": "When you say “Codex SDK”, what should v1 do in practice?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Spawn `codex` CLI only (subprocess) and stream output",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Use a Codex Node SDK if available; fallback to spawning the CLI",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "SDK only (no subprocess), even if it’s more work",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other: (describe expected interface)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "-> B as a last resort",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q2",
+          "prompt": "Should codex-designer manage credentials at all?",
+          "options": [
+            {
+              "key": "A",
+              "text": "No; rely entirely on Codex’s existing auth/config (user logs in outside the app)",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Yes; allow setting API key / env vars per run profile in the UI",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both (default to A, with an advanced override)",
+              "recommended": true
+            }
+          ],
+          "recommendedKey": "C",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q3",
+          "prompt": "What exactly should be configurable in v1 “Advanced”?",
+          "options": [
+            {
+              "key": "A",
+              "text": "approval policy, sandbox mode, network on/off, working directory, model",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "A + runtime limits (timeouts, max steps) and generation params (if supported)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Keep v1 minimal: model + 2–3 presets only",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q4",
+          "prompt": "What presets should we ship with by default (names + what they map to)?",
+          "options": [],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Careful and YOLO.. best judgement on both --- YOLO should be no training wheels.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q5",
+          "prompt": "Do you want a mandatory review step before changes land on disk?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes: require a clean git tree; run; show diff; user clicks “Apply”",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Optional: show diff, but allow auto-apply",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No: let Codex apply changes directly",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q6",
+          "prompt": "If the workspace is not a git repo, should codex-designer offer to `git init` before implementation runs?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes, always prompt",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Yes, but only for “new project” workspaces",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q7",
+          "prompt": "If a user edits an earlier answer before implementation starts, what should happen?",
+          "options": [
+            {
+              "key": "A",
+              "text": "“Reopen round”: regenerate plan starting from that round forward (keep an audit trail)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Append a correction note; only regenerate the next round",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Disallow editing content; only allow new clarifications (despite earlier preference)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q8",
+          "prompt": "For “defer this round”, should a deferred test automatically reappear in the next testing round?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (and it’s “not evaluated” until you run it)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (deferred stays deferred until manually un-deferred)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Support both behaviors per item",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q9",
+          "prompt": "Confirm these v1 paths (or propose alternatives):",
+          "options": [],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Confirmed",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q10",
+          "prompt": "Which OSs should v1 target?",
+          "options": [
+            {
+              "key": "A",
+              "text": "macOS only",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "macOS + Windows",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "macOS + Windows + Linux",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q11",
+          "prompt": "Preferred distribution format (if any): DMG / ZIP / installer / “dev only for now”?",
+          "options": [],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "dev only for now",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-3",
+      "title": "Round 3",
+      "questions": [
+        {
+          "id": "r3-q1",
+          "prompt": "You said “best judgement” for presets — confirm these default mappings for v1?",
+          "options": [
+            {
+              "key": "A",
+              "text": "`sandbox=workspace-write`, `approval=on-request`, `network=off`",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "`sandbox=workspace-write`, `approval=on-failure`, `network=off`",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            },
+            {
+              "id": "rev-2",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q2",
+          "prompt": "If the Codex SDK cannot support a requested setting (e.g. sandbox/network/approval) or cannot run the needed “skill flow”, how should v1 behave?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Transparently fall back to spawning the `codex` CLI for that run",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Fall back, but show a warning + require explicit confirmation in the UI",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Do not fall back; instead disable that capability in the UI until the SDK supports it",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q3",
+          "prompt": "Is it acceptable that run profiles + recent workspaces live in Electron `userData` (per-machine), while the actual artifacts live in the workspace `docs/`?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Prefer everything repo-local",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both: global defaults, but allow exporting/importing profiles per workspace",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q4",
+          "prompt": "Since there’s no mandatory pre-apply diff review, do you want an optional “checkpoint” before implementation runs?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes: offer “Create checkpoint commit” when git is available (default on in Careful)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Optional toggle only (default off)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No checkpoint support in v1",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Default to commit locally before implementations. Autogen commit message based on changes (like on nano-model summary)",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q5",
+          "prompt": "For pre-implementation edits that become appended corrections (not rewriting history), how should the UI show the “current answer”?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Latest correction is the current answer; show history collapsed/expandable",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Original answer stays “current”; corrections are notes only",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Append to the end of the doc in the current round -- pull it forward preserve the previous round to show the evolution of the thought process around the concept.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q6",
+          "prompt": "How should `docs/[feature].test.json` track testing rounds?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Store only current status per test, plus a lightweight per-round summary history",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Store full per-round results (each round has statuses/notes/attachments)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No history; latest only",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q7",
+          "prompt": "Confirm statuses needed per test item (v1):",
+          "options": [
+            {
+              "key": "A",
+              "text": "`not_run`, `pass`, `fail`, `deferred`, `blocked`",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "`pass`, `fail`, `deferred` only (keep it minimal)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "plus feedback lines (text+image)",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q8",
+          "prompt": "When you click “Implement feedback” from failed tests, should codex-designer:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Run implementation only (patch code) using failing tests/notes as input; do not rewrite the plan",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Update the plan first (so plan stays source of truth), then run implementation",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Ask each time (A/B)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "Resume implementation session and add feedback to the prompt with test context",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-4",
+      "title": "Round 4",
+      "questions": [
+        {
+          "id": "r4-q1",
+          "prompt": "In presets/advanced settings, what should “network=off” actually mean?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Disallow network for tool/executed commands (e.g. `npm install`, `curl`), but model calls still work",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Fully offline (no model calls / no installs) — only local edits",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q2",
+          "prompt": "For the default pre-implementation checkpoint commit, what should happen if the git working tree is dirty?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Commit all current changes (staging automatically) as the checkpoint",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Prompt user to choose what to include (stage/unstage UI)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Refuse and ask user to clean up manually",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q3",
+          "prompt": "If the working tree is clean, should we create an empty checkpoint commit anyway?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (for a consistent undo anchor)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (just remember the current HEAD as the checkpoint)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q4",
+          "prompt": "After an implementation run finishes, should codex-designer also offer to auto-commit the new changes?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (default on in Careful, off in YOLO)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Yes (default on in both)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "No (checkpoint only)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "commit happens after acceptance/testing.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q5",
+          "prompt": "When exporting run profiles per workspace, where should the exported file live?",
+          "options": [
+            {
+              "key": "A",
+              "text": "`docs/.codex-designer/profiles.json`",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "`.codex-designer/profiles.json` (repo root)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "`docs/codex-designer.profiles.json`",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q6",
+          "prompt": "For “resume implementation session”, should sessions be resumable across app restarts?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (store a stable session/run identifier)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (resume only within the current app session)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Best effort (resume when possible; otherwise start a new session)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "C (prefer A)",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q7",
+          "prompt": "When a correction is appended, should codex-designer automatically regenerate the plan (from the next round), or require an explicit action?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Auto-regenerate immediately",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Require clicking “Regenerate plan”",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Ask each time",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "should be part of the Q&A rounds",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q8",
+          "prompt": "In the UI, how should the “current answer” vs history be displayed?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Show current answer (latest), with a collapsible “Answer history” timeline",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Always show the full evolution inline (no collapse)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "but expanded by default",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q9",
+          "prompt": "What should start a new “testing round” in `docs/[feature].test.json`?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Each time the user clicks “Start testing round”",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Each time after an implementation run completes",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both (A is manual; B auto-creates a new round if tests change)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r4-q10",
+          "prompt": "For feedback lines (text + images), should we store them:",
+          "options": [
+            {
+              "key": "A",
+              "text": "On the test item overall (shared across rounds)",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Per-round, per-test item (recommended)",
+              "recommended": true
+            },
+            {
+              "key": "C",
+              "text": "Per-failure only (when status = fail)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "B",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-5",
+      "title": "Round 5",
+      "questions": [
+        {
+          "id": "r5-q1",
+          "prompt": "Should `.codex-designer/` be gitignored by default?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes, add to `.gitignore` automatically (profiles are local-only)",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "No, keep it commit-friendly by default (teams can share profiles)",
+              "recommended": true
+            },
+            {
+              "key": "C",
+              "text": "Ask per workspace (“Local only” vs “Shareable in repo”)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "B",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q2",
+          "prompt": "What should “acceptance” mean for enabling a final commit?",
+          "options": [
+            {
+              "key": "A",
+              "text": "All “key features to test” are `pass` (no fails/blocked), then allow “Commit accepted changes”",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Manual “Mark accepted” toggle independent of test statuses",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both (A gates by default in Careful; YOLO allows manual override)",
+              "recommended": true
+            }
+          ],
+          "recommendedKey": "C",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q3",
+          "prompt": "When the user clicks “Commit accepted changes”, should codex-designer:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Stage and commit all changes in the repo",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Show a simple file list for inclusion/exclusion (no full staging UI)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Require the user to stage manually outside the app",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q4",
+          "prompt": "For “auto-create a new testing round after implementation runs when tests change”, what should count as “tests change” in v1?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Any implementation run that modifies files in the workspace",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Only if the test definition list changes (`docs/[feature].test.json` items added/removed/edited)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Only if there were code changes AND at least one test is not `pass`",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other:",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q5",
+          "prompt": "In Careful preset, should the UI allow a one-shot override for a single run (e.g. temporarily enable tool-network for `npm install`)?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (explicit per-run override with clear warning)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (must change the active profile)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Yes, but only via Advanced panel",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q6",
+          "prompt": "If we cannot truly “resume” a prior Codex session (SDK limitation), should codex-designer:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Start a new session but include a structured recap + links to artifacts/run logs as context",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Start a new session with no recap (clean slate)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Block and require SDK resume support",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r5-q7",
+          "prompt": "When Q&A has new answers/corrections that haven’t been folded into the plan yet, should codex-designer block implementation until “Regenerate plan” runs?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (plan must be source of truth before implementation)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (allow implementation but warn)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Only block in Careful; YOLO can proceed",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-6",
+      "title": "Round 6",
+      "questions": [
+        {
+          "id": "r6-q1",
+          "prompt": "Since you want to choose “Local only” vs “Shareable in repo” per workspace, should we split `.codex-designer/` into:",
+          "options": [
+            {
+              "key": "A",
+              "text": "`.codex-designer/share/` (profiles, committed if shareable) + `.codex-designer/cache/` (always gitignored: run logs, snapshots, etc.)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Keep a single folder and just toggle gitignore on/off for the whole thing",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q2",
+          "prompt": "Regardless of shareability, should run logs (stream output, diffs, checkpoints metadata) be kept:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Repo-local under `.codex-designer/cache/`",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Only in Electron `userData`",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both (cache in repo for portability; userData for recent/perf)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q3",
+          "prompt": "In Careful preset, should “All tests pass” mean:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Every key test status is `pass` (so `deferred`/`blocked`/`not_run` prevent acceptance)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "`pass` or `deferred` is acceptable (allow acceptance with deferred items)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q4",
+          "prompt": "You want “stage + commit all changes”. If there are still failing/unrun tests, should YOLO allow committing anyway?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes (manual override)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No (commit action always gated by acceptance)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q5",
+          "prompt": "Should the commit message be:",
+          "options": [
+            {
+              "key": "A",
+              "text": "Auto-generated but editable before commit",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Fully auto (no edit)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Manual entry only (no generator)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q6",
+          "prompt": "To enforce “plan must be source of truth” in Careful, where should we store the “plan generated from Q&A up to round N / hash” metadata?",
+          "options": [
+            {
+              "key": "A",
+              "text": "In `.codex-designer/cache/state.json` only (no changes to docs)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "As a small machine-readable footer/header in the plan/Q&A markdown (portable across machines)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q7",
+          "prompt": "When we auto-create a new testing round after code changes (and some tests aren’t `pass`), how should the new round initialize statuses?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Copy previous round statuses forward as defaults",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Reset all to `not_run` (previous round remains as history)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Reset only previously-`pass` tests to `not_run` (keep fail/deferred/blocked)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "You choose.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r6-q8",
+          "prompt": "Which settings should be eligible for a one-shot override in Careful?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Network only (tool/executed commands)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Network + approval policy",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Network + approval + sandbox",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Other (describe)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-01-28T23:46:29.554Z",
+              "selectedKey": "A",
+              "notes": "I don't care. Just choose something that makes sense. I'll be using YOLO all the time anyway.",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

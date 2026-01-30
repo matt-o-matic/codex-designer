@@ -42,6 +42,7 @@ export type StartRunArgs = {
   role: ThreadRole
   profileId: RunProfile['id']
   model?: string
+  modelReasoningEffort?: ThreadOptions['modelReasoningEffort']
   input: Input
   outputSchema?: unknown
   oneShotNetwork?: boolean
@@ -52,7 +53,27 @@ export type RunStarted = {
 }
 
 export type RunLifecycleEvent =
-  | { type: 'run.started'; runId: string; featureSlug?: string; role: ThreadRole }
+  | {
+      type: 'run.started'
+      runId: string
+      featureSlug?: string
+      role: ThreadRole
+      profileId: RunProfile['id']
+      model: string | null
+      modelReasoningEffort: ThreadOptions['modelReasoningEffort'] | null
+      oneShotNetwork: boolean
+    }
+  | {
+      type: 'run.options'
+      runId: string
+      profileId: RunProfile['id']
+      model: string | null
+      modelReasoningEffort: ThreadOptions['modelReasoningEffort'] | null
+      sandboxMode: ThreadOptions['sandboxMode'] | null
+      approvalPolicy: ThreadOptions['approvalPolicy'] | null
+      networkAccessEnabled: ThreadOptions['networkAccessEnabled'] | null
+      oneShotNetwork: boolean
+    }
   | { type: 'run.thread'; runId: string; threadId: string }
   | { type: 'run.checkpoint'; runId: string; headCommit: string }
   | { type: 'run.result'; runId: string; finalResponse: string }
@@ -77,7 +98,16 @@ export class CodexRunManager {
     const runId = randomUUID()
     const abort = new AbortController()
     this.runs.set(runId, { abort, status: 'running' })
-    onEvent({ type: 'run.started', runId, featureSlug: args.featureSlug, role: args.role })
+    onEvent({
+      type: 'run.started',
+      runId,
+      featureSlug: args.featureSlug,
+      role: args.role,
+      profileId: args.profileId,
+      model: args.model ?? null,
+      modelReasoningEffort: args.modelReasoningEffort ?? null,
+      oneShotNetwork: args.oneShotNetwork === true,
+    })
 
     void this.runInternal(runId, args, onEvent).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -104,17 +134,22 @@ export class CodexRunManager {
   ): Promise<void> {
     if (args.role === 'implementation') {
       const gitRepo = await isGitRepo(args.workspacePath)
-      if (!gitRepo) {
+
+      if (!gitRepo && args.profileId === 'careful') {
         throw new Error('Workspace is not a git repo. Initialize git before running implementation.')
       }
 
-      const porcelain = await gitStatusPorcelain(args.workspacePath)
-      if (porcelain.trim().length) {
-        throw new Error('Workspace git working tree is dirty. Please clean/commit/stash before running implementation.')
+      if (gitRepo && args.profileId === 'careful') {
+        const porcelain = await gitStatusPorcelain(args.workspacePath)
+        if (porcelain.trim().length) {
+          throw new Error('Workspace git working tree is dirty. Please clean/commit/stash before running implementation.')
+        }
       }
 
-      const headCommit = await gitHeadCommit(args.workspacePath)
-      onEvent({ type: 'run.checkpoint', runId, headCommit })
+      if (gitRepo) {
+        const headCommit = await gitHeadCommit(args.workspacePath)
+        onEvent({ type: 'run.checkpoint', runId, headCommit })
+      }
 
       if (args.profileId === 'careful' && args.featureSlug) {
         const planPath = path.join(args.workspacePath, 'docs', `${args.featureSlug}.plan.md`)
@@ -131,16 +166,35 @@ export class CodexRunManager {
 
     const profilesFile = await readProfilesFile(args.workspacePath)
     const workspaceProfile = profilesFile?.profiles?.find((p) => p.id === args.profileId) ?? null
-    const profile = workspaceProfile ? { ...DEFAULT_PROFILES[args.profileId], threadOptions: workspaceProfile.threadOptions } : DEFAULT_PROFILES[args.profileId]
+    const profile = workspaceProfile
+      ? { ...DEFAULT_PROFILES[args.profileId], threadOptions: workspaceProfile.threadOptions }
+      : DEFAULT_PROFILES[args.profileId]
     const effectiveThreadOptions: ThreadOptions = {
       workingDirectory: args.workspacePath,
-      model: args.model,
       ...profile.threadOptions,
+    }
+
+    if (args.model) effectiveThreadOptions.model = args.model
+    if (args.modelReasoningEffort) effectiveThreadOptions.modelReasoningEffort = args.modelReasoningEffort
+    if (args.role === 'implementation' && args.profileId === 'yolo') {
+      effectiveThreadOptions.skipGitRepoCheck = true
     }
 
     if (args.oneShotNetwork === true) {
       effectiveThreadOptions.networkAccessEnabled = true
     }
+
+    onEvent({
+      type: 'run.options',
+      runId,
+      profileId: args.profileId,
+      model: effectiveThreadOptions.model ?? null,
+      modelReasoningEffort: effectiveThreadOptions.modelReasoningEffort ?? null,
+      sandboxMode: effectiveThreadOptions.sandboxMode ?? null,
+      approvalPolicy: effectiveThreadOptions.approvalPolicy ?? null,
+      networkAccessEnabled: effectiveThreadOptions.networkAccessEnabled ?? null,
+      oneShotNetwork: args.oneShotNetwork === true,
+    })
 
     const { thread, persistThreadId } = await this.getThread(args.workspacePath, args.featureSlug, args.role, effectiveThreadOptions)
 

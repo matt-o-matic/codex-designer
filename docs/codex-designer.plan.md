@@ -140,9 +140,9 @@ Default to an **App UI** (workflow/data-heavy), dark-mode-first, Tailwind-first,
 
 ### Codex integration (layer on top, not a replacement)
 
-- codex-designer should **not** implement planning/implementation logic itself; it should orchestrate Codex runs (skills) and present a better UX around them.
+- codex-designer should **not** re-implement Codex; it should orchestrate Codex runs using deterministic prompt templates (based on the skills) and present a better UX around them. Skills are inspiration, not a required dependency.
 - Runs should be configurable by the user: model, preset mode, advanced permissions/settings (approval policy, sandbox mode, network on/off, working directory).
-- Implementation should run the equivalent of the `$implement-plan` skill against the generated plan file and maintain `docs/[feature].impl.md`.
+- Implementation should run a deterministic “implement from plan” prompt (equivalent to the `implement-plan` behavior) and maintain `docs/[feature].impl.md`.
 - Codex auth is out of scope for codex-designer; users authenticate/configure Codex outside the app.
 - “Implement feedback” should resume the current implementation session and add failed-test context (notes + attachments) to the prompt.
 
@@ -204,7 +204,7 @@ Default to an **App UI** (workflow/data-heavy), dark-mode-first, Tailwind-first,
    - render and edit `docs/[feature].plan.md`
    - show diff/changes between rounds
 7. Codex integration
-   - run “plan-task” and “implement-plan” flows via `@openai/codex-sdk`
+   - run planning + implementation flows via `@openai/codex-sdk` using deterministic prompt templates (skill-inspired, not skill-dependent)
    - SDK limitations: if requested settings cannot be applied, warn + require confirmation; then run best-effort
    - Git integration:
      - prompt to `git init` if workspace is not a repo (before implementation runs)

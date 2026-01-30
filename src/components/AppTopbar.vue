@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   canOpenNav?: boolean
+  navOpen?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -10,6 +11,9 @@ const emit = defineEmits<{
 }>()
 
 const isDark = ref(document.documentElement.classList.contains('dark'))
+
+const navIcon = computed(() => (props.navOpen === false ? 'menu' : 'menu_open'))
+const navLabel = computed(() => (props.navOpen === false ? 'Show navigation' : 'Hide navigation'))
 
 function toggleTheme() {
   isDark.value = !isDark.value
@@ -22,15 +26,15 @@ function toggleTheme() {
   <header
     class="sticky top-0 z-10 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-gray-950/70"
   >
-    <div class="flex items-center gap-3 px-4 py-3 sm:px-6">
+    <div class="flex items-center gap-3 px-3 py-3 sm:px-4">
       <button
-        v-if="canOpenNav"
-        class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 md:hidden"
+        v-if="props.canOpenNav"
+        class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
         type="button"
-        aria-label="Open navigation"
+        :aria-label="navLabel"
         @click="emit('toggle-nav')"
       >
-        <span class="material-symbols-rounded text-[20px]">menu</span>
+        <span class="material-symbols-rounded text-[20px]" aria-hidden="true">{{ navIcon }}</span>
       </button>
 
       <div class="min-w-0">

@@ -20,7 +20,7 @@ Q&A (read-only): `docs/codex-designer.qna.md`
   - Workspace scan for `docs/*.plan.md` to discover features.
 - Integrated Codex SDK runner (main process) with streaming events + abort support and a small “runner playground” UI.
 - Added first-pass session UI:
-  - “New work” modal runs `$plan-task <slug>` via Codex SDK.
+  - “New work” modal runs a deterministic planning prompt (schema-backed) via Codex SDK.
   - Q&A tab parses `docs/[feature].qna.md` into structured questions (choices + freeform) and writes answers back to markdown.
   - Plan tab renders `docs/[feature].plan.md`.
   - Testing tab reads/writes `docs/[feature].test.json` + exports `docs/[feature].test.md`, supports per-round status and pasted-image attachments.
@@ -36,6 +36,21 @@ Q&A (read-only): `docs/codex-designer.qna.md`
 - Added “Implement feedback” from Testing (fails/blocked + attachments passed back into an implementation run).
 - Added one-shot “tool network” override toggles (Careful) for planning/testing and implementation runs.
 - Added implementation UI gating for git requirements (init git + dirty tree warnings).
+- Fixed Codex SDK binary resolution by externalizing `@openai/codex-sdk` from the Electron main bundle (so its vendored `vendor/` binaries resolve correctly).
+- Added dynamic window title updates to include workspace + active session slug.
+- Fixed “New work” UX so a session slug route shows the run stream even before `docs/*.plan.md` exists (previously the right panel showed “Select a feature session”).
+- Streamlined the UI layout (full-width app; reduced horizontal padding and card padding on Sessions/Workspace/Settings).
+- Converted all model fields to a dropdown (common models + “Custom…” escape hatch) for planning/implementation/new work and the Settings runner.
+- Replaced the hard-coded model list with a live query to Codex (`app-server` JSON-RPC `model/list`) so the dropdown only shows valid Codex models for the signed-in user.
+- Q&A UX upgrades:
+  - Answers are multi-line, auto-growing fields (same for other freeform text inputs).
+  - Pasting images into Q&A answers saves them under `docs/assets/[feature]/...`, inserts a markdown reference into the answer, and automatically includes those images as `local_image` inputs in subsequent planning/implementation runs.
+  - Added “Regenerate latest” for Q&A to delete and re-generate the most recent round.
+  - Q&A answers now persist as an append-only answer block (`A:` followed by indented lines), so multi-line answers and image refs don’t break parsing.
+- Improved Q&A parsing and UX:
+  - More robust option parsing (including bolded `**A)**` styles) and `Recommended:` / `Default:` line support.
+  - Q&A UI shows a recommended/default choice and preselects an option when answers are blank.
+- Hardened “New work” submission: added submit state + error handling; navigates immediately to the new session and refreshes workspace in the background.
 - Commands run:
   - `npm install`
   - `npm run typecheck`

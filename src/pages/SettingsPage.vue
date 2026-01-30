@@ -1,28 +1,39 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppState } from '../lib/appState'
-import { useRunStore } from '../lib/runStore'
+import { listCodexModels, type CodexModelInfo } from '../lib/models'
+import { useRunStore, type ModelReasoningEffort } from '../lib/runStore'
+import AutoGrowTextarea from '../components/AutoGrowTextarea.vue'
+import RunEventStream from '../components/RunEventStream.vue'
+import ModelsInspector from '../components/ModelsInspector.vue'
 
 const { activeWorkspace } = useAppState()
 const { startRun, abortRun, getRun } = useRunStore()
 
 const profileId = ref<'careful' | 'yolo'>('careful')
-const model = ref<string>('')
+const modelChoice = ref<string>('default')
+const modelCustom = ref<string>('')
+const modelValue = computed(() => {
+  if (modelChoice.value === 'default') return ''
+  if (modelChoice.value === 'custom') return modelCustom.value.trim()
+  return modelChoice.value
+})
+const thinkingChoice = ref<'default' | ModelReasoningEffort>('default')
+const thinkingValue = computed(() => {
+  if (thinkingChoice.value === 'default') return ''
+  return thinkingChoice.value
+})
 const prompt = ref<string>('Summarize this repository and suggest the next 3 improvements.')
 
 const selectedRunId = ref<string | null>(null)
 
+const codexModels = ref<CodexModelInfo[]>([])
+const modelsLoading = ref(false)
+const modelsError = ref<string | null>(null)
+
 const runRecord = computed(() => getRun(selectedRunId.value))
 const isBusy = computed(() => runRecord.value?.status === 'running')
 const canRun = computed(() => !!activeWorkspace.value && !!prompt.value.trim() && !isBusy.value)
-
-function pretty(e: unknown): string {
-  try {
-    return JSON.stringify(e, null, 2)
-  } catch {
-    return String(e)
-  }
-}
 
 async function start() {
   if (!activeWorkspace.value) return
@@ -30,7 +41,8 @@ async function start() {
     workspacePath: activeWorkspace.value.path,
     role: 'generic',
     profileId: profileId.value,
-    model: model.value.trim() || undefined,
+    model: modelValue.value || undefined,
+    modelReasoningEffort: thinkingValue.value || undefined,
     input: prompt.value,
   })
   selectedRunId.value = runId
@@ -40,11 +52,28 @@ async function stop() {
   if (!selectedRunId.value) return
   await abortRun(selectedRunId.value)
 }
+
+async function refreshModels(forceRefresh = false) {
+  modelsLoading.value = true
+  modelsError.value = null
+  try {
+    codexModels.value = await listCodexModels({ forceRefresh })
+  } catch (e) {
+    codexModels.value = []
+    modelsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    modelsLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void refreshModels()
+})
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+  <div class="space-y-4">
+    <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">tune</span>
         <div class="min-w-0">
@@ -56,7 +85,7 @@ async function stop() {
       </div>
     </div>
 
-    <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">terminal</span>
         <div class="min-w-0">
@@ -109,23 +138,61 @@ async function stop() {
 
           <div>
             <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Model (optional)</div>
-            <input
-              v-model="model"
-              type="text"
-              placeholder="Leave blank for default"
-              class="mt-2 w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-              :disabled="isBusy"
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                v-model="modelChoice"
+                class="w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
+                :disabled="isBusy"
+              >
+                <option value="default">Default model</option>
+                <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                  {{ m.displayName }}{{ m.isDefault ? ' (default)' : '' }}
+                </option>
+                <option value="custom">Custom…</option>
+              </select>
+
+              <input
+                v-if="modelChoice === 'custom'"
+                v-model="modelCustom"
+                type="text"
+                placeholder="model id"
+                class="w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
+                :disabled="isBusy"
+              />
+            </div>
+
+            <div class="mt-3">
+              <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Thinking level</div>
+              <select
+                v-model="thinkingChoice"
+                class="mt-2 w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
+                :disabled="isBusy"
+              >
+                <option value="default">Default</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">XHigh</option>
+              </select>
+            </div>
+
+            <ModelsInspector
+              :models="codexModels"
+              :loading="modelsLoading"
+              :error="modelsError"
+              @refresh="refreshModels"
             />
           </div>
 
           <div>
             <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Prompt</div>
-            <textarea
+            <AutoGrowTextarea
               v-model="prompt"
-              rows="6"
-              class="mt-2 w-full resize-none rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
+              :min-rows="6"
+              class="mt-2 w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
               :disabled="isBusy"
-            ></textarea>
+            />
           </div>
 
           <div class="flex items-center gap-2">
@@ -153,16 +220,30 @@ async function stop() {
 
         <div>
           <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Events</div>
-          <div
-            class="mt-2 h-[420px] overflow-auto rounded-2xl border border-gray-200 bg-gray-50 p-3 font-mono text-[11px] text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-100"
-          >
-            <div v-if="!runRecord?.events?.length" class="text-gray-500 dark:text-gray-400">
+          <div class="mt-2">
+            <RunEventStream
+              v-if="runRecord"
+              :events="runRecord.events"
+              :status="runRecord.status"
+              :started-at="runRecord.startedAt"
+              :ended-at="runRecord.endedAt"
+              :meta="{
+                profileId: runRecord.profileId,
+                model: runRecord.model,
+                modelReasoningEffort: runRecord.modelReasoningEffort,
+                sandboxMode: runRecord.sandboxMode,
+                approvalPolicy: runRecord.approvalPolicy,
+                networkAccessEnabled: runRecord.networkAccessEnabled,
+                oneShotNetwork: runRecord.oneShotNetwork,
+              }"
+              :max-events="100"
+            />
+            <div
+              v-else
+              class="mt-2 h-[420px] rounded-2xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400"
+            >
               Run to stream events…
             </div>
-            <pre v-for="(e, idx) in runRecord?.events ?? []" :key="idx" class="whitespace-pre-wrap break-words">
-{{ pretty(e) }}
-</pre
-            >
           </div>
         </div>
       </div>
