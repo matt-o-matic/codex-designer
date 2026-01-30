@@ -1,6 +1,8 @@
 import { BrowserWindow, app, clipboard, dialog, ipcMain } from 'electron'
+import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { gitCommitAll, gitDiff, gitDiffStat, gitHeadCommit, gitInit, gitStatusPorcelain, isGitRepo } from './lib/git'
 import { updateGitignore } from './lib/gitignore'
 import { listCodexModels } from './lib/codexModels'
@@ -17,6 +19,29 @@ import {
   WorkspaceShareability,
   writeWorkspaceState,
 } from './lib/workspaceState'
+
+const execFileAsync = promisify(execFile)
+
+async function getWslgWaylandEnv(): Promise<NodeJS.ProcessEnv | null> {
+  if (process.platform !== 'linux') return null
+  const isWsl =
+    typeof process.env.WSL_INTEROP === 'string' ||
+    typeof process.env.WSL_DISTRO_NAME === 'string' ||
+    typeof process.env.WSLENV === 'string'
+  if (!isWsl) return null
+
+  const runtimeDir = '/mnt/wslg/runtime-dir'
+  const display = String(process.env.WAYLAND_DISPLAY || 'wayland-0').trim()
+  if (!display) return null
+
+  try {
+    await fs.stat(path.join(runtimeDir, display))
+  } catch {
+    return null
+  }
+
+  return { ...process.env, XDG_RUNTIME_DIR: runtimeDir, WAYLAND_DISPLAY: display }
+}
 
 export type WorkspaceSummary = {
   path: string
@@ -49,18 +74,122 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.handle('codex-designer:get-clipboard-formats', async () => {
-    try {
-      return clipboard.availableFormats() ?? []
-    } catch {
-      return []
+    const types: Array<'clipboard' | 'selection'> =
+      process.platform === 'linux' ? ['clipboard', 'selection'] : ['clipboard']
+    const out = new Set<string>()
+    for (const t of types) {
+      try {
+        const formats = clipboard.availableFormats(t as any) ?? []
+        for (const f of formats) out.add(f)
+      } catch {
+        // ignore
+      }
     }
+
+    if (process.platform === 'linux') {
+      try {
+        const env = (await getWslgWaylandEnv()) ?? undefined
+        const res = await execFileAsync('wl-paste', ['-l'], {
+          env,
+          timeout: 1500,
+          maxBuffer: 1024 * 1024,
+        })
+        const lines = String((res as any).stdout ?? '')
+          .split(/\r?\n/g)
+          .map((l) => l.trim())
+          .filter(Boolean)
+        for (const l of lines) out.add(l)
+      } catch {
+        // ignore (wl-paste may not be installed or WAYLAND_DISPLAY not set)
+      }
+    }
+
+    return Array.from(out)
   })
 
   ipcMain.handle('codex-designer:read-clipboard-image-data-url', async (): Promise<string | null> => {
+    const types: Array<'clipboard' | 'selection'> =
+      process.platform === 'linux' ? ['clipboard', 'selection'] : ['clipboard']
+
+    const toDataUrl = (mime: string, buf: Buffer) => `data:${mime};base64,${buf.toString('base64')}`
+
+    const normalizeMime = (format: string) => {
+      const f = String(format ?? '').trim()
+      if (/^image\//i.test(f)) return f.toLowerCase()
+      if (/png/i.test(f)) return 'image/png'
+      if (/jpe?g/i.test(f)) return 'image/jpeg'
+      if (/webp/i.test(f)) return 'image/webp'
+      if (/gif/i.test(f)) return 'image/gif'
+      if (/bmp/i.test(f) || /dib/i.test(f)) return 'image/bmp'
+      if (/tiff?/i.test(f)) return 'image/tiff'
+      return 'application/octet-stream'
+    }
+
     try {
-      const img = clipboard.readImage()
-      if (!img || img.isEmpty()) return null
-      return img.toDataURL()
+      // 1) Best effort via nativeImage (works well on most platforms).
+      for (const t of types) {
+        try {
+          const img = clipboard.readImage(t as any)
+          if (img && !img.isEmpty()) return img.toDataURL()
+        } catch {
+          // ignore
+        }
+      }
+
+      // 2) Fallback via raw buffers for whatever image formats are exposed.
+      for (const t of types) {
+        let formats: string[] = []
+        try {
+          formats = clipboard.availableFormats(t as any) ?? []
+        } catch {
+          formats = []
+        }
+        const candidates = formats.filter((f) => /^image\//i.test(f) || /(png|jpe?g|webp|gif|bmp|dib|tiff?)/i.test(f))
+        for (const fmt of candidates) {
+          try {
+            const buf = (clipboard as any).readBuffer(fmt, t) as Buffer
+            if (!buf || !buf.length) continue
+            const mime = normalizeMime(fmt)
+            return toDataUrl(mime, buf)
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // 3) Wayland fallback (WSLg often exposes clipboard images only to Wayland clients).
+      // If Electron is running under X11, clipboard.availableFormats() can be empty even when wl-paste shows image/*.
+      if (process.platform === 'linux') {
+        try {
+          const env = (await getWslgWaylandEnv()) ?? undefined
+          const listed = await execFileAsync('wl-paste', ['-l'], {
+            env,
+            timeout: 1500,
+            maxBuffer: 1024 * 1024,
+          })
+          const lines = String((listed as any).stdout ?? '')
+            .split(/\r?\n/g)
+            .map((l) => l.trim())
+            .filter(Boolean)
+          const images = lines.filter((l) => /^image\//i.test(l)).map((l) => l.toLowerCase())
+          if (images.length) {
+            const preferred = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff']
+            const chosen = preferred.find((p) => images.includes(p)) ?? images[0]
+            const data = await execFileAsync('wl-paste', ['--type', chosen], {
+              env,
+              timeout: 5000,
+              maxBuffer: 100 * 1024 * 1024,
+              encoding: 'buffer' as any,
+            })
+            const buf = (data as any).stdout as Buffer
+            if (buf && buf.length) return toDataUrl(chosen, buf)
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      return null
     } catch {
       return null
     }

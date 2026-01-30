@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
 import { parseQnaMarkdown } from '../lib/qna'
@@ -697,13 +697,27 @@ function inferSelectedKeyFromNotes(q: QnaQuestionV1, notes: string): { selectedK
   return { selectedKey: key, nextNotes: rebuilt.trimEnd() }
 }
 
+function inferredDraftSelectedKey(q: QnaQuestionV1): string | null {
+  const draftSel = String(draftSelected.value[q.id] ?? '').trim()
+  if (draftSel.length) return null
+  const draftN = normalizeNotes(draftNotes.value[q.id] ?? '')
+  const inferred = inferSelectedKeyFromNotes(q, draftN)
+  return inferred.selectedKey
+}
+
+function effectiveDraftSelectedKey(q: QnaQuestionV1): string {
+  const draftSel = String(draftSelected.value[q.id] ?? '').trim().toUpperCase()
+  if (draftSel.length) return draftSel
+  return inferredDraftSelectedKey(q) ?? ''
+}
+
 async function commitCurrentRound() {
   if (!activeWorkspace.value || !selectedSlug.value) return
   if (qnaLocked.value) return
   if (!qnaState.value) return
 
   const now = new Date().toISOString()
-  const nextState = structuredClone(qnaState.value)
+  const nextState: QnaStateV1 = structuredClone(toRaw(qnaState.value))
   const latestRoundId = nextState.rounds.length ? nextState.rounds[nextState.rounds.length - 1].id : null
 
   let changed = false
@@ -718,9 +732,14 @@ async function commitCurrentRound() {
         q.answers.length === 0 ? inLatestRound : (qnaEditOpen.value[q.id] === true && hasDraft)
       if (!shouldCommit) continue
 
-      const inferred = draftSel.length ? { selectedKey: null as string | null, nextNotes: draftN } : inferSelectedKeyFromNotes(q, draftN)
+      const inferred = inferSelectedKeyFromNotes(q, draftN)
       const selectedKey = (draftSel || inferred.selectedKey || q.recommendedKey).toUpperCase()
-      const notes = inferred.nextNotes
+      const notes =
+        draftSel.length && inferred.selectedKey === draftSel.toUpperCase()
+          ? inferred.nextNotes
+          : draftSel.length
+            ? draftN
+            : inferred.nextNotes
       const attachments = uniqSorted(extractWorkspaceImagePaths(notes))
 
       const cur = getCurrentAnswer(q)
@@ -2091,9 +2110,9 @@ watch(
                           :key="opt.key"
                           class="inline-flex w-full items-center justify-start gap-2 rounded-xl px-3 py-2 text-left text-xs font-black shadow-sm transition-colors"
                           :class="
-                            String(draftSelected[qItem.id] ?? '').trim().toUpperCase() === opt.key
+                            effectiveDraftSelectedKey(qItem) === opt.key
                               ? 'bg-brand-600 text-white shadow-brand-600/20'
-                              : String(draftSelected[qItem.id] ?? '').trim().length === 0 && opt.key === qItem.recommendedKey
+                              : effectiveDraftSelectedKey(qItem).length === 0 && opt.key === qItem.recommendedKey
                                 ? 'border border-brand-400 bg-white text-gray-700 hover:bg-gray-50 dark:border-brand-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
                                 : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
                           "
@@ -2115,7 +2134,12 @@ watch(
                       </div>
 
                       <div v-if="String(draftSelected[qItem.id] ?? '').trim().length === 0" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        No option selected. Commit will use Recommended: {{ qItem.recommendedKey }}.
+                        <template v-if="inferredDraftSelectedKey(qItem)">
+                          Inferred selection from notes: {{ inferredDraftSelectedKey(qItem) }}. Commit will use {{ inferredDraftSelectedKey(qItem) }}.
+                        </template>
+                        <template v-else>
+                          No option selected. Commit will use Recommended: {{ qItem.recommendedKey }}.
+                        </template>
                       </div>
 
                       <div class="mt-3">
