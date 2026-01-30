@@ -110,6 +110,9 @@ const api = {
   readAttachmentDataUrl(workspacePath: string, relPath: string): Promise<string> {
     return ipcRenderer.invoke('codex-designer:read-attachment-data-url', { workspacePath, relPath })
   },
+  deleteAttachment(workspacePath: string, relPath: string): Promise<boolean> {
+    return ipcRenderer.invoke('codex-designer:delete-attachment', { workspacePath, relPath })
+  },
   getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string> {
     return ipcRenderer.invoke('codex-designer:get-git-diff-stat', { workspacePath, fromCommit })
   },

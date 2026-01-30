@@ -9,6 +9,10 @@ Q&A (read-only): `docs/codex-designer.qna.md`
 
 ## Work log
 
+### 2026-01-30
+
+- Fixed Codex runner to always use the selected workspace as `workingDirectory` (profiles can no longer override it).
+
 ### 2026-01-28
 
 - Initialized implementation log.

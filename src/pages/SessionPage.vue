@@ -1433,8 +1433,53 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
   showToast('Image attached')
 }
 
-function removeNewWorkAttachment(idx: number) {
+async function deleteAttachmentIfPossible(relPath: string): Promise<void> {
+  if (!activeWorkspace.value) return
+  try {
+    await window.codexDesigner?.deleteAttachment?.(activeWorkspace.value.path, relPath)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    showToast(`Failed to delete attachment: ${msg}`, 3500)
+  }
+}
+
+async function removeNewWorkAttachment(idx: number) {
+  const rel = newWorkAttachments.value[idx]
+  if (!rel) return
   newWorkAttachments.value.splice(idx, 1)
+  await deleteAttachmentIfPossible(rel)
+}
+
+async function removeNewWorkAttachmentRel(relPath: string) {
+  const idx = newWorkAttachments.value.findIndex((p) => p === relPath)
+  if (idx === -1) return
+  await removeNewWorkAttachment(idx)
+}
+
+function removeAttachmentRefsFromText(text: string, relPath: string): string {
+  const raw = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = raw.split('\n')
+  const kept = lines.filter((line) => !line.includes(relPath))
+  // Keep user formatting mostly intact, but avoid leaving giant blank gaps after removals.
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+async function removeQnaDraftAttachment(qId: string, relPath: string) {
+  const existing = String(draftNotes.value[qId] ?? '')
+  draftNotes.value[qId] = removeAttachmentRefsFromText(existing, relPath)
+  await deleteAttachmentIfPossible(relPath)
+  showToast('Image removed')
+}
+
+async function removeTestFeedbackAttachment(testId: string, relPath: string) {
+  const r = getResult(testId)
+  if (!r) return
+  const fb = r.feedback[0]
+  if (!fb) return
+  fb.attachments = (fb.attachments ?? []).filter((p: string) => p !== relPath)
+  await saveTestPlan()
+  await deleteAttachmentIfPossible(relPath)
+  showToast('Image removed')
 }
 
 async function createNewWork() {
@@ -2088,6 +2133,8 @@ watch(
                             :workspace-path="activeWorkspace.path"
                             :attachments="extractWorkspaceImagePaths(String(draftNotes[qItem.id] ?? ''))"
                             :max="6"
+                            allow-remove
+                            @remove="(rel) => removeQnaDraftAttachment(qItem.id, rel)"
                           />
                         </div>
                         <AutoGrowTextarea
@@ -2449,6 +2496,8 @@ watch(
                           :workspace-path="activeWorkspace.path"
                           :attachments="getResult(t.id)!.feedback[0].attachments"
                           :max="6"
+                          allow-remove
+                          @remove="(rel) => removeTestFeedbackAttachment(t.id, rel)"
                         />
                       </div>
                       <AutoGrowTextarea
@@ -2630,6 +2679,8 @@ watch(
                   :attachments="newWorkAttachments"
                   :max="8"
                   size-class="h-24 w-24"
+                  allow-remove
+                  @remove="removeNewWorkAttachmentRel"
                 />
               </div>
               <div

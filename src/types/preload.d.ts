@@ -103,6 +103,7 @@ declare global {
         bytesBase64: string
       }): Promise<{ relPath: string }>
       readAttachmentDataUrl(workspacePath: string, relPath: string): Promise<string>
+      deleteAttachment(workspacePath: string, relPath: string): Promise<boolean>
       getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string>
       getGitDiff(workspacePath: string, fromCommit: string): Promise<string>
       gitCommitAll(

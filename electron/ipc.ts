@@ -303,6 +303,21 @@ export function registerIpcHandlers() {
   )
 
   ipcMain.handle(
+    'codex-designer:delete-attachment',
+    async (_event, args: { workspacePath: string; relPath: string }): Promise<boolean> => {
+      const rel = String(args.relPath ?? '').replace(/\\/g, '/')
+      if (!rel.startsWith('docs/assets/')) throw new Error('Only attachments under docs/assets/ can be deleted.')
+
+      const abs = resolveInside(args.workspacePath, args.relPath)
+      const st = await fs.stat(abs).catch(() => null)
+      if (!st) return true
+      if (st.isDirectory()) throw new Error('Refusing to delete a directory.')
+      await fs.rm(abs, { force: true })
+      return true
+    }
+  )
+
+  ipcMain.handle(
     'codex-designer:get-git-diff-stat',
     async (_event, args: { workspacePath: string; fromCommit: string }): Promise<string> => {
       return gitDiffStat(args.workspacePath, `${args.fromCommit}..HEAD`)

@@ -170,8 +170,8 @@ export class CodexRunManager {
       ? { ...DEFAULT_PROFILES[args.profileId], threadOptions: workspaceProfile.threadOptions }
       : DEFAULT_PROFILES[args.profileId]
     const effectiveThreadOptions: ThreadOptions = {
-      workingDirectory: args.workspacePath,
       ...profile.threadOptions,
+      workingDirectory: args.workspacePath,
     }
 
     if (args.model) effectiveThreadOptions.model = args.model
