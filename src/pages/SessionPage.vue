@@ -4,7 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
 import { parseQnaMarkdown } from '../lib/qna'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
-import { buildImplementationPrompt, buildPlanningCreatePrompt, buildPlanningNextRoundPrompt } from '../lib/prompts'
+import {
+  buildImplementationFollowupPrompt,
+  buildImplementationPrompt,
+  buildPlanningCreatePrompt,
+  buildPlanningNextRoundPrompt,
+} from '../lib/prompts'
 import {
   parseQnaStateJson,
   renderQnaMarkdownFromState,
@@ -92,6 +97,9 @@ const implementationOneShotNetwork = ref(false)
 const lastImplementationRunId = ref<string | null>(null)
 const lastImplementationRun = computed(() => getRun(lastImplementationRunId.value))
 const lastImplementationCheckpoint = computed(() => lastImplementationRun.value?.checkpoint ?? null)
+
+const implementationFollowupText = ref<string>('')
+const implementationFollowupError = ref<string | null>(null)
 
 const diffStat = ref<string>('')
 const diffText = ref<string>('')
@@ -908,6 +916,38 @@ async function runImplementation() {
   implementationOneShotNetwork.value = false
 }
 
+async function runImplementationFollowup() {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (isRunBusy.value) return
+  implementationFollowupError.value = null
+
+  const message = String(implementationFollowupText.value ?? '').trim()
+  if (!message.length) return
+
+  const attachments = extractWorkspaceImagePaths(message)
+  const text = buildImplementationFollowupPrompt({
+    featureSlug: selectedSlug.value,
+    message,
+    attachments,
+  })
+  const images = extractWorkspaceImagePaths(text)
+
+  const runId = await startRun({
+    workspacePath: activeWorkspace.value.path,
+    featureSlug: selectedSlug.value,
+    role: 'implementation',
+    profileId: implementationProfileId.value,
+    model: implementationModelValue.value || undefined,
+    modelReasoningEffort: implementationThinkingValue.value || undefined,
+    oneShotNetwork: implementationProfileId.value === 'careful' ? implementationOneShotNetwork.value : undefined,
+    input: inputWithImages(text, images),
+  })
+
+  activeRunId.value = runId
+  lastImplementationRunId.value = runId
+  implementationOneShotNetwork.value = false
+}
+
 function getFeedbackContext() {
   if (!testPlan.value || !selectedSlug.value) return null
   const round = getCurrentRound()
@@ -1331,6 +1371,132 @@ const newWorkThinkingValue = computed(() => {
 const newWorkRunId = ref<string | null>(null)
 const newWorkRun = computed(() => getRun(newWorkRunId.value))
 
+type WorkspaceRunDefaults = {
+  model?: string
+  modelReasoningEffort?: ModelReasoningEffort | ''
+}
+
+type WorkspaceRunDefaultsByRole = {
+  planning?: WorkspaceRunDefaults
+  implementation?: WorkspaceRunDefaults
+  newWork?: WorkspaceRunDefaults
+}
+
+let suppressWorkspaceRunDefaultsAutosave = false
+let workspaceRunDefaultsSaveTimer: number | null = null
+
+function applyModelChoiceFromValue(
+  modelValue: string | undefined,
+  targetChoice: { value: string },
+  targetCustom: { value: string }
+) {
+  const raw = String(modelValue ?? '').trim()
+  if (!raw) {
+    targetChoice.value = 'default'
+    targetCustom.value = ''
+    return
+  }
+  const known = codexModels.value.some((m) => m.model === raw)
+  if (known) {
+    targetChoice.value = raw
+    targetCustom.value = ''
+    return
+  }
+  targetChoice.value = 'custom'
+  targetCustom.value = raw
+}
+
+function applyThinkingChoiceFromValue(value: string | undefined, targetChoice: { value: 'default' | ModelReasoningEffort }) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    targetChoice.value = 'default'
+    return
+  }
+  const allowed: Array<ModelReasoningEffort> = ['minimal', 'low', 'medium', 'high', 'xhigh']
+  if (allowed.includes(raw as ModelReasoningEffort)) {
+    targetChoice.value = raw as ModelReasoningEffort
+    return
+  }
+  targetChoice.value = 'default'
+}
+
+async function loadWorkspaceRunDefaults(workspacePath: string) {
+  try {
+    const defaults = (await window.codexDesigner?.getWorkspaceRunDefaults?.(workspacePath)) as WorkspaceRunDefaultsByRole | null
+    if (!defaults) return
+
+    suppressWorkspaceRunDefaultsAutosave = true
+    applyModelChoiceFromValue(defaults.planning?.model, planningModelChoice, planningModelCustom)
+    applyThinkingChoiceFromValue(defaults.planning?.modelReasoningEffort, planningThinkingChoice)
+
+    applyModelChoiceFromValue(defaults.implementation?.model, implementationModelChoice, implementationModelCustom)
+    applyThinkingChoiceFromValue(defaults.implementation?.modelReasoningEffort, implementationThinkingChoice)
+
+    applyModelChoiceFromValue(defaults.newWork?.model, newWorkModelChoice, newWorkModelCustom)
+    applyThinkingChoiceFromValue(defaults.newWork?.modelReasoningEffort, newWorkThinkingChoice)
+  } finally {
+    queueMicrotask(() => {
+      suppressWorkspaceRunDefaultsAutosave = false
+    })
+  }
+}
+
+async function saveWorkspaceRunDefaults() {
+  if (!activeWorkspace.value) return
+  const payload: WorkspaceRunDefaultsByRole = {
+    planning: {
+      model: planningModelValue.value || '',
+      modelReasoningEffort: (planningThinkingValue.value as ModelReasoningEffort | '') || '',
+    },
+    implementation: {
+      model: implementationModelValue.value || '',
+      modelReasoningEffort: (implementationThinkingValue.value as ModelReasoningEffort | '') || '',
+    },
+    newWork: {
+      model: newWorkModelValue.value || '',
+      modelReasoningEffort: (newWorkThinkingValue.value as ModelReasoningEffort | '') || '',
+    },
+  }
+  await window.codexDesigner?.setWorkspaceRunDefaults?.(activeWorkspace.value.path, payload)
+}
+
+function scheduleWorkspaceRunDefaultsSave() {
+  if (!activeWorkspace.value) return
+  if (suppressWorkspaceRunDefaultsAutosave) return
+  if (workspaceRunDefaultsSaveTimer) window.clearTimeout(workspaceRunDefaultsSaveTimer)
+  workspaceRunDefaultsSaveTimer = window.setTimeout(() => {
+    workspaceRunDefaultsSaveTimer = null
+    void saveWorkspaceRunDefaults().catch(() => {})
+  }, 400)
+}
+
+watch(
+  () => activeWorkspace.value?.path ?? null,
+  (p) => {
+    if (!p) return
+    void loadWorkspaceRunDefaults(p)
+  },
+  { immediate: true }
+)
+
+watch(
+  () => codexModels.value.map((m) => m.model).join('|'),
+  () => {
+    if (!activeWorkspace.value) return
+    void loadWorkspaceRunDefaults(activeWorkspace.value.path)
+  }
+)
+
+watch(
+  () => ({
+    planning: { model: planningModelValue.value, thinking: planningThinkingValue.value },
+    implementation: { model: implementationModelValue.value, thinking: implementationThinkingValue.value },
+    newWork: { model: newWorkModelValue.value, thinking: newWorkThinkingValue.value },
+  }),
+  () => scheduleWorkspaceRunDefaultsSave(),
+  { deep: true }
+)
+
 function openNewWorkModal() {
   newWorkOpen.value = true
   newWorkAttachmentError.value = null
@@ -1452,6 +1618,56 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
   showToast('Image attached')
 }
 
+async function onPasteImplementationFollowup(e: ClipboardEvent) {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (isRunBusy.value) return
+  const dt = e.clipboardData
+  if (!dt) return
+  debugPaste(`impl-followup`, e)
+
+  const file = findImageFile(dt)
+  const html = dt.getData('text/html')
+  const text = dt.getData('text/plain')
+  const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+
+  if (!file && !dataUrlFromText) {
+    e.preventDefault()
+    const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
+    const parsed = parseImageDataUrl(clipUrl || '')
+    if (!parsed) {
+      pastePlainTextIntoTarget(e, text || '')
+      return
+    }
+
+    const saved = await window.codexDesigner!.saveAttachment({
+      workspacePath: activeWorkspace.value.path,
+      featureSlug: selectedSlug.value,
+      ext: parsed.ext,
+      bytesBase64: parsed.bytesBase64,
+    })
+
+    pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
+    showToast('Image attached')
+    return
+  }
+
+  e.preventDefault()
+
+  const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
+  const parsed = parseImageDataUrl(dataUrl)
+  if (!parsed) return
+
+  const saved = await window.codexDesigner!.saveAttachment({
+    workspacePath: activeWorkspace.value.path,
+    featureSlug: selectedSlug.value,
+    ext: parsed.ext,
+    bytesBase64: parsed.bytesBase64,
+  })
+
+  pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
+  showToast('Image attached')
+}
+
 async function deleteAttachmentIfPossible(relPath: string): Promise<void> {
   if (!activeWorkspace.value) return
   try {
@@ -1497,6 +1713,13 @@ async function removeTestFeedbackAttachment(testId: string, relPath: string) {
   if (!fb) return
   fb.attachments = (fb.attachments ?? []).filter((p: string) => p !== relPath)
   await saveTestPlan()
+  await deleteAttachmentIfPossible(relPath)
+  showToast('Image removed')
+}
+
+async function removeImplementationFollowupAttachment(relPath: string) {
+  const existing = String(implementationFollowupText.value ?? '')
+  implementationFollowupText.value = removeAttachmentRefsFromText(existing, relPath)
   await deleteAttachmentIfPossible(relPath)
   showToast('Image removed')
 }
@@ -2398,6 +2621,70 @@ watch(
               <div v-if="diffText" class="mt-3 rounded-xl border border-gray-200 bg-white p-3 text-[11px] text-gray-800 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100">
                 <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Diff</div>
                 <pre class="mt-2 whitespace-pre-wrap">{{ diffText }}</pre>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Follow-up</div>
+                  <div class="mt-1 text-sm font-bold">Continue the Codex implementation thread</div>
+                  <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    Paste build errors, logs, and screenshots. This sends another message into the same implementation thread.
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
+                    type="button"
+                    :disabled="isRunBusy || !String(implementationFollowupText ?? '').trim().length"
+                    @click="implementationFollowupText = ''"
+                  >
+                    <span class="material-symbols-rounded text-[18px]">delete</span>
+                    Clear
+                  </button>
+                  <button
+                    class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
+                    type="button"
+                    :disabled="isRunBusy || !String(implementationFollowupText ?? '').trim().length"
+                    @click="runImplementationFollowup"
+                  >
+                    <span class="material-symbols-rounded text-[18px]">send</span>
+                    Send follow-up
+                  </button>
+                </div>
+              </div>
+
+              <div
+                v-if="
+                  activeWorkspace &&
+                  extractWorkspaceImagePaths(String(implementationFollowupText ?? '')).length
+                "
+                class="mt-3"
+              >
+                <AttachmentPreviews
+                  :workspace-path="activeWorkspace.path"
+                  :attachments="extractWorkspaceImagePaths(String(implementationFollowupText ?? ''))"
+                  :max="6"
+                  allow-remove
+                  @remove="(rel) => removeImplementationFollowupAttachment(rel)"
+                />
+              </div>
+
+              <AutoGrowTextarea
+                v-model="implementationFollowupText"
+                :min-rows="4"
+                class="mt-3 w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
+                placeholder="Paste build errors, logs, or context… Paste images here."
+                :disabled="isRunBusy"
+                @paste="onPasteImplementationFollowup($event as ClipboardEvent)"
+              />
+
+              <div
+                v-if="implementationFollowupError"
+                class="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200"
+              >
+                {{ implementationFollowupError }}
               </div>
             </div>
           </div>

@@ -134,12 +134,18 @@ export class CodexRunManager {
   ): Promise<void> {
     if (args.role === 'implementation') {
       const gitRepo = await isGitRepo(args.workspacePath)
+      const isContinuation =
+        args.profileId === 'careful' && args.featureSlug
+          ? !!(await readWorkspaceState(args.workspacePath)).features?.[args.featureSlug]?.implementationThreadId
+          : false
 
       if (!gitRepo && args.profileId === 'careful') {
         throw new Error('Workspace is not a git repo. Initialize git before running implementation.')
       }
 
-      if (gitRepo && args.profileId === 'careful') {
+      // Careful runs should start from a clean baseline. Once an implementation thread exists, allow follow-ups
+      // (e.g. fixing build errors) without forcing intermediate commits.
+      if (gitRepo && args.profileId === 'careful' && !isContinuation) {
         const porcelain = await gitStatusPorcelain(args.workspacePath)
         if (porcelain.trim().length) {
           throw new Error('Workspace git working tree is dirty. Please clean/commit/stash before running implementation.')
@@ -151,7 +157,7 @@ export class CodexRunManager {
         onEvent({ type: 'run.checkpoint', runId, headCommit })
       }
 
-      if (args.profileId === 'careful' && args.featureSlug) {
+      if (args.profileId === 'careful' && args.featureSlug && !isContinuation) {
         const planPath = path.join(args.workspacePath, 'docs', `${args.featureSlug}.plan.md`)
         const qnaPath = path.join(args.workspacePath, 'docs', `${args.featureSlug}.qna.md`)
         const [planStat, qnaStat] = await Promise.all([

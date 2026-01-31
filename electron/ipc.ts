@@ -17,6 +17,7 @@ import {
   ensureWorkspaceDirs,
   readWorkspaceState,
   WorkspaceShareability,
+  type WorkspaceRunDefaultsByRole,
   writeWorkspaceState,
 } from './lib/workspaceState'
 
@@ -41,6 +42,33 @@ async function getWslgWaylandEnv(): Promise<NodeJS.ProcessEnv | null> {
   }
 
   return { ...process.env, XDG_RUNTIME_DIR: runtimeDir, WAYLAND_DISPLAY: display }
+}
+
+function sanitizeRunDefaults(input: unknown): WorkspaceRunDefaultsByRole | null {
+  if (!input || typeof input !== 'object') return null
+  const src = input as any
+
+  const out: WorkspaceRunDefaultsByRole = {}
+  const roles: Array<keyof WorkspaceRunDefaultsByRole> = ['planning', 'implementation', 'testing', 'generic', 'newWork']
+  const allowedEffort = new Set(['', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+
+  for (const role of roles) {
+    const raw = src[role]
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as any
+
+    const modelRaw = typeof r.model === 'string' ? r.model : ''
+    const model = modelRaw.trim().slice(0, 200)
+    const effortRaw = typeof r.modelReasoningEffort === 'string' ? r.modelReasoningEffort : ''
+    const modelReasoningEffort = allowedEffort.has(effortRaw) ? effortRaw : ''
+
+    const obj: any = {}
+    if (model.length) obj.model = model
+    if (modelReasoningEffort.length) obj.modelReasoningEffort = modelReasoningEffort
+    if (Object.keys(obj).length) (out as any)[role] = obj
+  }
+
+  return Object.keys(out).length ? out : {}
 }
 
 export type WorkspaceSummary = {
@@ -282,6 +310,24 @@ export function registerIpcHandlers() {
       features: await listFeatures(workspacePath),
     }
   })
+
+  ipcMain.handle('codex-designer:get-workspace-run-defaults', async (_event, workspacePath: string) => {
+    await ensureWorkspaceDirs(workspacePath)
+    const wsState = await readWorkspaceState(workspacePath)
+    return wsState.runDefaults ?? null
+  })
+
+  ipcMain.handle(
+    'codex-designer:set-workspace-run-defaults',
+    async (_event, workspacePath: string, runDefaults: unknown): Promise<boolean> => {
+      await ensureWorkspaceDirs(workspacePath)
+      const wsState = await readWorkspaceState(workspacePath)
+      const next = sanitizeRunDefaults(runDefaults)
+      const merged = { ...wsState, runDefaults: next ?? undefined }
+      await writeWorkspaceState(workspacePath, merged)
+      return true
+    }
+  )
 
   ipcMain.handle('codex-designer:export-profiles', async (_event, workspacePath: string): Promise<string | null> => {
     const raw = await fs.readFile(workspaceProfilesPath(workspacePath), 'utf-8')

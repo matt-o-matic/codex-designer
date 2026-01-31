@@ -141,6 +141,7 @@ class RunLogWriter {
   private stream: ReturnType<typeof createWriteStream> | null = null
   private meta: RunLogMeta
   private closed = false
+  private metaWriteChain: Promise<void> = Promise.resolve()
 
   constructor(runId: string, meta: RunLogMeta) {
     this.meta = meta
@@ -176,27 +177,42 @@ class RunLogWriter {
       } else if (t === 'run.failed') {
         this.meta.status = 'failed'
         if (typeof (evt as any).message === 'string') this.meta.error = String((evt as any).message)
-        void this.finalize()
+        void this.finalize().catch((e) => console.error('[run-logs] finalize failed', e))
       } else if (t === 'run.aborted') {
         this.meta.status = 'aborted'
-        void this.finalize()
+        void this.finalize().catch((e) => console.error('[run-logs] finalize failed', e))
       } else if (t === 'run.completed') {
         if (this.meta.status === 'running') this.meta.status = 'completed'
-        void this.finalize()
+        void this.finalize().catch((e) => console.error('[run-logs] finalize failed', e))
       }
     }
   }
 
+  private queueMetaWrite(): Promise<void> {
+    this.metaWriteChain = this.metaWriteChain
+      .catch(() => {
+        // keep chain alive
+      })
+      .then(() => writeJsonFileAtomic(this.metaFile, this.meta))
+      .catch((e) => {
+        console.error('[run-logs] meta write failed', e)
+      })
+    return this.metaWriteChain
+  }
+
   private async flushMeta(): Promise<void> {
-    if (this.closed) return
-    await writeJsonFileAtomic(this.metaFile, this.meta)
+    if (this.closed) {
+      await this.metaWriteChain
+      return
+    }
+    await this.queueMetaWrite()
   }
 
   private async finalize(): Promise<void> {
     if (this.closed) return
     this.closed = true
     this.meta.endedAt = nowIso()
-    await writeJsonFileAtomic(this.metaFile, this.meta)
+    await this.queueMetaWrite()
 
     const s = this.stream
     this.stream = null

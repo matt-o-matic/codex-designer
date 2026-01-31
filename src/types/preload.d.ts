@@ -59,6 +59,23 @@ declare global {
           updatedAtMs: number | null
         }[]
       }>
+      getWorkspaceRunDefaults(workspacePath: string): Promise<{
+        planning?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+        implementation?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+        testing?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+        generic?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+        newWork?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+      } | null>
+      setWorkspaceRunDefaults(
+        workspacePath: string,
+        runDefaults: {
+          planning?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+          implementation?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+          testing?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+          generic?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+          newWork?: { model?: string; modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | '' }
+        } | null
+      ): Promise<boolean>
       initGit(workspacePath: string): Promise<{
         path: string
         isGitRepo: boolean

@@ -27,6 +27,19 @@ type WorkspaceSummary = {
   }[]
 }
 
+type WorkspaceRunDefaults = {
+  model?: string
+  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | ''
+}
+
+type WorkspaceRunDefaultsByRole = {
+  planning?: WorkspaceRunDefaults
+  implementation?: WorkspaceRunDefaults
+  testing?: WorkspaceRunDefaults
+  generic?: WorkspaceRunDefaults
+  newWork?: WorkspaceRunDefaults
+}
+
 type StartRunArgs = {
   workspacePath: string
   featureSlug?: string
@@ -75,6 +88,12 @@ const api = {
   },
   setWorkspaceShareability(workspacePath: string, shareability: 'local' | 'shareable'): Promise<WorkspaceSummary> {
     return ipcRenderer.invoke('codex-designer:set-workspace-shareability', workspacePath, shareability)
+  },
+  getWorkspaceRunDefaults(workspacePath: string): Promise<WorkspaceRunDefaultsByRole | null> {
+    return ipcRenderer.invoke('codex-designer:get-workspace-run-defaults', workspacePath)
+  },
+  setWorkspaceRunDefaults(workspacePath: string, runDefaults: WorkspaceRunDefaultsByRole | null): Promise<boolean> {
+    return ipcRenderer.invoke('codex-designer:set-workspace-run-defaults', workspacePath, runDefaults)
   },
   initGit(workspacePath: string): Promise<WorkspaceSummary> {
     return ipcRenderer.invoke('codex-designer:init-git', workspacePath)

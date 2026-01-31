@@ -3,9 +3,23 @@ import { ensureDir, readJsonFile, writeJsonFileAtomic } from './fs'
 
 export type WorkspaceShareability = 'local' | 'shareable'
 
+export type WorkspaceRunDefaults = {
+  model?: string
+  modelReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | ''
+}
+
+export type WorkspaceRunDefaultsByRole = {
+  planning?: WorkspaceRunDefaults
+  implementation?: WorkspaceRunDefaults
+  testing?: WorkspaceRunDefaults
+  generic?: WorkspaceRunDefaults
+  newWork?: WorkspaceRunDefaults
+}
+
 export type WorkspaceState = {
   version: 1
   shareability?: WorkspaceShareability
+  runDefaults?: WorkspaceRunDefaultsByRole
   features?: Record<
     string,
     {
@@ -53,4 +67,3 @@ export async function writeWorkspaceState(workspacePath: string, next: Workspace
   const filePath = workspaceStatePath(workspacePath)
   await writeJsonFileAtomic(filePath, next)
 }
-

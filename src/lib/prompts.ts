@@ -160,3 +160,21 @@ Do NOT modify the plan or Q&A docs. Implement the feature in the workspace accor
 - The repo’s relevant automated checks pass (tests/typecheck/build).
 `
 }
+
+export function buildImplementationFollowupPrompt(args: {
+  featureSlug: string
+  message: string
+  attachments?: string[]
+}): string {
+  const slug = args.featureSlug
+  const message = args.message?.trim() || ''
+  const attachments = Array.isArray(args.attachments) ? args.attachments.filter(Boolean) : []
+
+  return `Continue the existing Codex implementation thread for \`${slug}\`.
+
+The user is providing follow-up context (logs, build/test errors, screenshots) to address before continuing.
+
+## Follow-up
+${message || '(no message provided)'}${renderAttachments(attachments)}
+`
+}
