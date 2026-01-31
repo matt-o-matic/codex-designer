@@ -1,8 +1,11 @@
-import { Codex, type Input, type Thread, type ThreadEvent, type ThreadOptions, type TurnOptions } from '@openai/codex-sdk'
+import type { Input, ThreadEvent, ThreadOptions } from '@openai/codex-sdk'
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { promises as fs } from 'node:fs'
+import { closeSync, openSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { gitHeadCommit, gitStatusPorcelain, isGitRepo } from './git'
+import { findCodexBinaryPath } from './codexBinary'
+import { readCodexSessionCwd } from './codexSessions'
 import { resolveInside } from './safePath'
 import { readProfilesFile } from './workspaceProfiles'
 import { readWorkspaceState, writeWorkspaceState } from './workspaceState'
@@ -75,6 +78,7 @@ export type RunLifecycleEvent =
       oneShotNetwork: boolean
     }
   | { type: 'run.thread'; runId: string; threadId: string }
+  | { type: 'run.pid'; runId: string; pid: number }
   | { type: 'run.checkpoint'; runId: string; headCommit: string }
   | { type: 'run.result'; runId: string; finalResponse: string }
   | { type: 'run.completed'; runId: string }
@@ -83,21 +87,17 @@ export type RunLifecycleEvent =
 
 type RunState = {
   abort: AbortController
+  pid: number | null
   status: 'running' | 'completed' | 'failed' | 'aborted'
 }
 
 export class CodexRunManager {
-  private readonly codex: Codex
   private readonly runs = new Map<string, RunState>()
-
-  constructor() {
-    this.codex = new Codex()
-  }
 
   startRun(args: StartRunArgs, onEvent: (e: ThreadEvent | RunLifecycleEvent) => void): RunStarted {
     const runId = randomUUID()
     const abort = new AbortController()
-    this.runs.set(runId, { abort, status: 'running' })
+    this.runs.set(runId, { abort, pid: null, status: 'running' })
     onEvent({
       type: 'run.started',
       runId,
@@ -125,6 +125,9 @@ export class CodexRunManager {
     if (state.status !== 'running') return
     state.status = 'aborted'
     state.abort.abort()
+    if (typeof state.pid === 'number' && Number.isFinite(state.pid)) {
+      void this.killRunProcess(state.pid).catch(() => {})
+    }
   }
 
   private async runInternal(
@@ -132,12 +135,11 @@ export class CodexRunManager {
     args: StartRunArgs,
     onEvent: (e: ThreadEvent | RunLifecycleEvent) => void
   ): Promise<void> {
+    const { resumeThreadId, persistThreadId } = await this.getThreadState(args.workspacePath, args.featureSlug, args.role)
+
     if (args.role === 'implementation') {
       const gitRepo = await isGitRepo(args.workspacePath)
-      const isContinuation =
-        args.profileId === 'careful' && args.featureSlug
-          ? !!(await readWorkspaceState(args.workspacePath)).features?.[args.featureSlug]?.implementationThreadId
-          : false
+      const isContinuation = args.profileId === 'careful' && !!resumeThreadId
 
       if (!gitRepo && args.profileId === 'careful') {
         throw new Error('Workspace is not a git repo. Initialize git before running implementation.')
@@ -202,62 +204,65 @@ export class CodexRunManager {
       oneShotNetwork: args.oneShotNetwork === true,
     })
 
-    const { thread, persistThreadId } = await this.getThread(args.workspacePath, args.featureSlug, args.role, effectiveThreadOptions)
-
-    const turnOptions: TurnOptions = {
-      outputSchema: args.outputSchema,
-      signal: this.runs.get(runId)?.abort.signal,
-    }
-
-    const input: Input = Array.isArray(args.input)
-      ? args.input.map((item: any) => {
-          if (item?.type === 'local_image' && typeof item.path === 'string') {
-            const absPath = path.isAbsolute(item.path) ? item.path : resolveInside(args.workspacePath, item.path)
-            return { ...item, path: absPath }
-          }
-          return item
-        })
-      : args.input
-
-    const { events } = await thread.runStreamed(input, turnOptions)
-    let finalResponse = ''
-    for await (const evt of events) {
-      onEvent(evt)
-      if (evt.type === 'thread.started') {
-        onEvent({ type: 'run.thread', runId, threadId: evt.thread_id })
-        await persistThreadId(evt.thread_id)
-      }
-      if (evt.type === 'item.completed' && evt.item.type === 'agent_message') {
-        finalResponse = evt.item.text
-      }
-      if (evt.type === 'turn.completed') {
-        // fallthrough: we'll emit run.completed after generator ends
-      }
-      if (evt.type === 'turn.failed') {
-        onEvent({ type: 'run.failed', runId, message: evt.error.message })
-      }
-    }
-
     const state = this.runs.get(runId)
+    const signal = state?.abort.signal
+
+    const { prompt, images } = normalizeInput(args.input, args.workspacePath)
+
+    const eventsFile = await this.ensureRunEventsFile(runId)
+    const stderrFile = eventsFile.replace(/\.events\.jsonl$/, '.stderr.log')
+    const schemaFile = eventsFile.replace(/\.events\.jsonl$/, '.output-schema.json')
+
+    if (args.outputSchema !== undefined) {
+      if (!isPlainJsonObject(args.outputSchema)) throw new Error('outputSchema must be a plain JSON object')
+      await fs.writeFile(schemaFile, JSON.stringify(args.outputSchema), 'utf-8')
+    }
+
+    const codexArgs = buildCodexExecArgs({
+      images,
+      threadId: resumeThreadId,
+      options: effectiveThreadOptions,
+      outputSchemaPath: args.outputSchema !== undefined ? schemaFile : undefined,
+    })
+
+    const { pid } = await this.spawnCodex({
+      args: codexArgs,
+      prompt,
+      eventsFile,
+      stderrFile,
+      signal,
+    })
+
+    const updated = this.runs.get(runId)
+    if (updated) updated.pid = pid
+    onEvent({ type: 'run.pid', runId, pid })
+
+    await this.followCodexEventsFile({
+      runId,
+      workspacePath: args.workspacePath,
+      eventsFile,
+      persistThreadId,
+      onEvent,
+      signal,
+    })
+
     if (state?.status === 'aborted') {
       onEvent({ type: 'run.aborted', runId })
       return
     }
 
-    onEvent({ type: 'run.result', runId, finalResponse })
+    // followCodexEventsFile will emit run.result / run.failed / run.completed.
     onEvent({ type: 'run.completed', runId })
     if (state) state.status = 'completed'
   }
 
-  private async getThread(
+  private async getThreadState(
     workspacePath: string,
     featureSlug: string | undefined,
     role: ThreadRole,
-    options: ThreadOptions
-  ): Promise<{ thread: Thread; persistThreadId: (threadId: string) => Promise<void> }> {
-    if (!featureSlug || role === 'generic') {
-      const thread = this.codex.startThread(options)
-      return { thread, persistThreadId: async () => {} }
+  ): Promise<{ resumeThreadId: string | null; persistThreadId: (threadId: string) => Promise<void> }> {
+    if (!featureSlug || role === 'generic' || role === 'testing') {
+      return { resumeThreadId: null, persistThreadId: async () => {} }
     }
 
     const state = await readWorkspaceState(workspacePath)
@@ -270,7 +275,7 @@ export class CodexRunManager {
           ? featureState.implementationThreadId
           : undefined
 
-    const thread = currentId ? this.codex.resumeThread(currentId, options) : this.codex.startThread(options)
+    const resumeThreadId = await this.validateResumeThreadId(workspacePath, featureSlug, role, currentId)
 
     const persistThreadId = async (threadId: string) => {
       const latest = await readWorkspaceState(workspacePath)
@@ -282,6 +287,268 @@ export class CodexRunManager {
       await writeWorkspaceState(workspacePath, { ...latest, features })
     }
 
-    return { thread, persistThreadId }
+    return { resumeThreadId, persistThreadId }
   }
+
+  private async validateResumeThreadId(
+    workspacePath: string,
+    featureSlug: string,
+    role: Exclude<ThreadRole, 'generic' | 'testing'>,
+    candidate: string | undefined
+  ): Promise<string | null> {
+    if (!candidate || !candidate.trim().length) return null
+
+    // Validate that the persisted Codex session was created in the same workspace.
+    // If it wasn't (or we can't verify), prefer starting a fresh thread over risking
+    // running tools against the wrong repo.
+    const cwd = await readCodexSessionCwd(candidate).catch(() => null)
+    const matches = cwd ? await sameRealPath(cwd, workspacePath) : false
+    if (matches) return candidate
+
+    const latest = await readWorkspaceState(workspacePath)
+    const features = { ...(latest.features ?? {}) }
+    const nextFeature = { ...(features[featureSlug] ?? {}) }
+    if (role === 'planning') delete nextFeature.planningThreadId
+    if (role === 'implementation') delete nextFeature.implementationThreadId
+    features[featureSlug] = nextFeature
+    await writeWorkspaceState(workspacePath, { ...latest, features })
+
+    return null
+  }
+
+  private async ensureRunEventsFile(runId: string): Promise<string> {
+    // Keep path in sync with RunLogStore.eventsPath(runId).
+    const { app } = await import('electron')
+    const dir = path.join(app.getPath('userData'), 'codex-designer', 'runs')
+    await fs.mkdir(dir, { recursive: true })
+    const file = path.join(dir, `${runId}.events.jsonl`)
+    await fs.writeFile(file, '', { flag: 'a' })
+    return file
+  }
+
+  private async spawnCodex(args: {
+    args: string[]
+    prompt: string
+    eventsFile: string
+    stderrFile: string
+    signal: AbortSignal | undefined
+  }): Promise<{ pid: number }> {
+    if (args.signal?.aborted) throw new Error('Run aborted.')
+
+    await fs.mkdir(path.dirname(args.eventsFile), { recursive: true })
+    const stdoutFd = openSync(args.eventsFile, 'a')
+    const stderrFd = openSync(args.stderrFile, 'a')
+
+    try {
+      const codexPath = findCodexBinaryPath()
+      const env = buildCodexEnv()
+      const child = spawn(codexPath, args.args, {
+        env,
+        detached: true,
+        stdio: ['pipe', stdoutFd, stderrFd],
+        windowsHide: true,
+      })
+      if (!child.pid) throw new Error('Failed to start Codex process.')
+
+      child.stdin?.write(args.prompt)
+      child.stdin?.end()
+      child.unref()
+
+      return { pid: child.pid }
+    } finally {
+      try {
+        closeSync(stdoutFd)
+      } catch {
+        // ignore
+      }
+      try {
+        closeSync(stderrFd)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private async followCodexEventsFile(args: {
+    runId: string
+    workspacePath: string
+    eventsFile: string
+    persistThreadId: (threadId: string) => Promise<void>
+    onEvent: (e: ThreadEvent | RunLifecycleEvent) => void
+    signal: AbortSignal | undefined
+  }): Promise<void> {
+    let offset = 0
+    let carry = ''
+    let finalResponse = ''
+    let emittedResult = false
+    let emittedFailed = false
+
+    const parseLine = async (line: string) => {
+      const trimmed = line.trim()
+      if (!trimmed) return
+      let evt: ThreadEvent
+      try {
+        evt = JSON.parse(trimmed) as ThreadEvent
+      } catch {
+        return
+      }
+      args.onEvent(evt)
+
+      if (evt.type === 'thread.started') {
+        args.onEvent({ type: 'run.thread', runId: args.runId, threadId: evt.thread_id })
+        await args.persistThreadId(evt.thread_id)
+      } else if (evt.type === 'item.completed' && (evt as any).item?.type === 'agent_message') {
+        const text = (evt as any).item?.text
+        if (typeof text === 'string') finalResponse = text
+      } else if (evt.type === 'turn.failed') {
+        if (!emittedFailed) {
+          emittedFailed = true
+          args.onEvent({ type: 'run.failed', runId: args.runId, message: evt.error.message })
+        }
+      } else if (evt.type === 'turn.completed') {
+        if (!emittedResult) {
+          emittedResult = true
+          args.onEvent({ type: 'run.result', runId: args.runId, finalResponse })
+        }
+      }
+    }
+
+    while (!args.signal?.aborted) {
+      const st = await fs.stat(args.eventsFile).catch(() => null)
+      const size = st?.size ?? 0
+      if (size > offset) {
+        const fh = await fs.open(args.eventsFile, 'r')
+        try {
+          while (offset < size) {
+            const remaining = size - offset
+            const toRead = Math.min(remaining, 64 * 1024)
+            const buf = Buffer.allocUnsafe(toRead)
+            const { bytesRead } = await fh.read(buf, 0, toRead, offset)
+            if (!bytesRead) break
+            offset += bytesRead
+
+            carry += buf.subarray(0, bytesRead).toString('utf8')
+            let nl = carry.indexOf('\n')
+            while (nl !== -1) {
+              const line = carry.slice(0, nl)
+              carry = carry.slice(nl + 1)
+              await parseLine(line)
+              nl = carry.indexOf('\n')
+            }
+          }
+        } finally {
+          await fh.close()
+        }
+      }
+
+      // Once we have a turn end signal, we can stop following shortly after.
+      if (emittedResult || emittedFailed) break
+
+      await sleep(125)
+    }
+
+    if (args.signal?.aborted) return
+    if (!emittedResult) {
+      args.onEvent({ type: 'run.result', runId: args.runId, finalResponse })
+    }
+  }
+
+  private async killRunProcess(pid: number): Promise<void> {
+    if (!Number.isFinite(pid) || pid <= 0) return
+    if (process.platform === 'win32') {
+      // Best-effort: kill process tree.
+      await new Promise<void>((resolve) => {
+        const child = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+        child.once('exit', () => resolve())
+        child.once('error', () => resolve())
+      })
+      return
+    }
+
+    // Kill the entire process group when detached.
+    try {
+      process.kill(-pid, 'SIGTERM')
+    } catch {
+      // ignore
+    }
+  }
+}
+
+type NormalizedInput = { prompt: string; images: string[] }
+
+function normalizeInput(input: Input, workspacePath: string): NormalizedInput {
+  if (typeof input === 'string') return { prompt: input, images: [] }
+  const promptParts: string[] = []
+  const images: string[] = []
+  for (const item of input) {
+    if (item.type === 'text') promptParts.push(item.text)
+    else if (item.type === 'local_image') {
+      const raw = item.path
+      if (path.isAbsolute(raw)) images.push(raw)
+      else images.push(resolveInside(workspacePath, raw))
+    }
+  }
+  return { prompt: promptParts.join('\n\n'), images }
+}
+
+function buildCodexExecArgs(args: {
+  images: string[]
+  threadId: string | null
+  options: ThreadOptions
+  outputSchemaPath?: string
+}): string[] {
+  const commandArgs: string[] = ['exec', '--experimental-json']
+
+  if (args.options.model) commandArgs.push('--model', args.options.model)
+  if (args.options.sandboxMode) commandArgs.push('--sandbox', args.options.sandboxMode)
+  if (args.options.workingDirectory) commandArgs.push('--cd', args.options.workingDirectory)
+  if (args.options.additionalDirectories?.length) {
+    for (const dir of args.options.additionalDirectories) commandArgs.push('--add-dir', dir)
+  }
+  if (args.options.skipGitRepoCheck) commandArgs.push('--skip-git-repo-check')
+  if (args.outputSchemaPath) commandArgs.push('--output-schema', args.outputSchemaPath)
+
+  if (args.options.modelReasoningEffort) {
+    commandArgs.push('--config', `model_reasoning_effort="${args.options.modelReasoningEffort}"`)
+  }
+  if (args.options.networkAccessEnabled !== undefined) {
+    commandArgs.push('--config', `sandbox_workspace_write.network_access=${args.options.networkAccessEnabled}`)
+  }
+  if (args.options.approvalPolicy) {
+    commandArgs.push('--config', `approval_policy="${args.options.approvalPolicy}"`)
+  }
+
+  if (args.images.length) {
+    for (const img of args.images) commandArgs.push('--image', img)
+  }
+  if (args.threadId) commandArgs.push('resume', args.threadId)
+
+  return commandArgs
+}
+
+function buildCodexEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value
+  }
+  if (!env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE) {
+    env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE = 'codex-designer'
+  }
+  return env
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function sameRealPath(a: string, b: string): Promise<boolean> {
+  const [ra, rb] = await Promise.all([
+    fs.realpath(a).catch(() => path.resolve(a)),
+    fs.realpath(b).catch(() => path.resolve(b)),
+  ])
+  return ra === rb
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

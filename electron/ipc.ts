@@ -394,7 +394,7 @@ export function registerIpcHandlers() {
 
     runId = started.runId
 
-    await runLogs.startRun(runId, args)
+    await runLogs.startRun(runId, args, { captureEvents: false })
     loggerReady = true
     for (const evt of bufferedLog) runLogs.append(runId, evt)
     void runLogs.prune(200)
@@ -407,6 +407,19 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('codex-designer:abort-run', async (_event, runId: string) => {
     runs.abortRun(runId)
+    const meta = await runLogs.readMeta(runId)
+    const pid = meta?.pid
+    if (!pid || !Number.isFinite(pid)) return
+    try {
+      if (process.platform === 'win32') {
+        const { spawn } = await import('node:child_process')
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+      } else {
+        process.kill(-pid, 'SIGTERM')
+      }
+    } catch {
+      // ignore
+    }
   })
 
   ipcMain.handle(

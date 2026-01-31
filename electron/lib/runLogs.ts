@@ -22,6 +22,7 @@ export type RunLogMeta = {
   checkpoint?: string
   threadId?: string
   finalResponse?: string
+  pid?: number
 }
 
 function rootDir(): string {
@@ -59,7 +60,7 @@ function nowIso(): string {
 export class RunLogStore {
   private readonly writers = new Map<string, RunLogWriter>()
 
-  async startRun(runId: string, args: StartRunArgs): Promise<void> {
+  async startRun(runId: string, args: StartRunArgs, opts?: { captureEvents?: boolean }): Promise<void> {
     if (this.writers.has(runId)) return
     await ensureDir(runsDir())
 
@@ -75,7 +76,7 @@ export class RunLogStore {
       status: 'running',
     }
 
-    const writer = new RunLogWriter(runId, meta)
+    const writer = new RunLogWriter(runId, meta, { captureEvents: opts?.captureEvents !== false })
     this.writers.set(runId, writer)
     await writer.init()
   }
@@ -85,6 +86,27 @@ export class RunLogStore {
     if (!writer) return
     writer.append(evt)
     if (writer.isClosed()) this.writers.delete(runId)
+  }
+
+  async readMeta(runId: string): Promise<RunLogMeta | null> {
+    const meta = await readJsonFile<RunLogMeta>(metaPath(runId))
+    return meta && meta.version === 1 ? meta : null
+  }
+
+  async setPid(runId: string, pid: number): Promise<void> {
+    const writer = this.writers.get(runId)
+    if (writer) {
+      writer.setPid(pid)
+      return
+    }
+    const meta = await this.readMeta(runId)
+    if (!meta) return
+    meta.pid = pid
+    await writeJsonFileAtomic(metaPath(runId), meta)
+  }
+
+  eventsPath(runId: string): string {
+    return eventsPath(runId)
   }
 
   async listRunLogs(filter?: { workspacePath?: string; featureSlug?: string }): Promise<RunLogMeta[]> {
@@ -142,16 +164,23 @@ class RunLogWriter {
   private meta: RunLogMeta
   private closed = false
   private metaWriteChain: Promise<void> = Promise.resolve()
+  private readonly captureEvents: boolean
 
-  constructor(runId: string, meta: RunLogMeta) {
+  constructor(runId: string, meta: RunLogMeta, opts: { captureEvents: boolean }) {
     this.meta = meta
     this.metaFile = metaPath(runId)
     this.eventsFile = eventsPath(runId)
+    this.captureEvents = opts.captureEvents
   }
 
   async init(): Promise<void> {
     await writeJsonFileAtomic(this.metaFile, this.meta)
-    this.stream = createWriteStream(this.eventsFile, { flags: 'a' })
+    if (this.captureEvents) {
+      this.stream = createWriteStream(this.eventsFile, { flags: 'a' })
+      return
+    }
+    // Ensure the events file exists for external writers.
+    await fs.writeFile(this.eventsFile, '', { flag: 'a' })
   }
 
   isClosed(): boolean {
@@ -174,6 +203,9 @@ class RunLogWriter {
         const text = String((evt as any).finalResponse)
         this.meta.finalResponse = text.length > 20000 ? text.slice(0, 20000) : text
         void this.flushMeta()
+      } else if (t === 'run.pid' && typeof (evt as any).pid === 'number') {
+        this.meta.pid = (evt as any).pid
+        void this.flushMeta()
       } else if (t === 'run.failed') {
         this.meta.status = 'failed'
         if (typeof (evt as any).message === 'string') this.meta.error = String((evt as any).message)
@@ -186,6 +218,12 @@ class RunLogWriter {
         void this.finalize().catch((e) => console.error('[run-logs] finalize failed', e))
       }
     }
+  }
+
+  setPid(pid: number): void {
+    if (this.closed) return
+    this.meta.pid = pid
+    void this.flushMeta()
   }
 
   private queueMetaWrite(): Promise<void> {
