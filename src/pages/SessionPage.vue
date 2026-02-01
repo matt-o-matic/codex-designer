@@ -113,6 +113,11 @@ const planLoadError = ref<string | null>(null)
 const qnaLoadError = ref<string | null>(null)
 const qnaLocked = ref(false)
 
+const qnaPlanNotes = ref<string>('')
+const qnaPlanNotesError = ref<string | null>(null)
+let suppressQnaPlanNotesAutosave = false
+let qnaPlanNotesSaveTimer: number | null = null
+
 const draftSelected = ref<Record<string, string>>({})
 const draftNotes = ref<Record<string, string>>({})
 const draftCache = ref<Record<string, { selectedKey: string; notes: string }>>({})
@@ -556,7 +561,7 @@ function migrateLegacyQnaMarkdownToState(featureSlug: string, markdown: string):
     return { id: `round-${roundNumber}`, title, questions }
   })
 
-  return { version: 1, featureSlug, updatedAt: now, rounds }
+  return { version: 1, featureSlug, updatedAt: now, notes: '', rounds }
 }
 
 async function applyPlanningCreateOutput(runId: string, workspacePath: string, featureSlug: string) {
@@ -645,6 +650,18 @@ watch(
 )
 
 watch(
+  () => qnaState.value?.notes ?? '',
+  (notes) => {
+    suppressQnaPlanNotesAutosave = true
+    qnaPlanNotes.value = String(notes ?? '')
+    queueMicrotask(() => {
+      suppressQnaPlanNotesAutosave = false
+    })
+  },
+  { immediate: true }
+)
+
+watch(
   [draftSelected, draftNotes],
   () => {
     scheduleDraftAutosave()
@@ -652,8 +669,51 @@ watch(
   { deep: true }
 )
 
+watch(
+  () => qnaPlanNotes.value,
+  () => scheduleQnaPlanNotesSave()
+)
+
 function normalizeNotes(text: unknown): string {
   return String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
+}
+
+async function saveQnaPlanNotes(): Promise<void> {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (qnaLocked.value) return
+  if (!qnaState.value) return
+
+  const nextNotes = normalizeNotes(qnaPlanNotes.value)
+  const curNotes = normalizeNotes((qnaState.value as any).notes ?? '')
+  if (nextNotes === curNotes) return
+
+  const nextState: QnaStateV1 = structuredClone(toRaw(qnaState.value))
+  nextState.notes = nextNotes
+  nextState.updatedAt = new Date().toISOString()
+
+  await window.codexDesigner!.writeTextFile(
+    activeWorkspace.value.path,
+    `docs/${selectedSlug.value}.qna.json`,
+    JSON.stringify(nextState, null, 2) + '\n'
+  )
+  const md = renderQnaMarkdownFromState(nextState)
+  await window.codexDesigner!.writeTextFile(activeWorkspace.value.path, `docs/${selectedSlug.value}.qna.md`, md)
+  qnaState.value = nextState
+  qnaMarkdown.value = md
+}
+
+function scheduleQnaPlanNotesSave(): void {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (qnaLocked.value || isRunBusy.value) return
+  if (suppressQnaPlanNotesAutosave) return
+  if (qnaPlanNotesSaveTimer) window.clearTimeout(qnaPlanNotesSaveTimer)
+  qnaPlanNotesSaveTimer = window.setTimeout(() => {
+    qnaPlanNotesSaveTimer = null
+    qnaPlanNotesError.value = null
+    void saveQnaPlanNotes().catch((e) => {
+      qnaPlanNotesError.value = e instanceof Error ? e.message : String(e)
+    })
+  }, 400)
 }
 
 function uniqSorted(list: string[]): string[] {
@@ -797,11 +857,20 @@ async function commitCurrentRound() {
   await writeDraftCacheForFeature(selectedSlug.value, {}, {})
 }
 
+async function runPlanNotesRound() {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (qnaLocked.value) return
+  if (isRunBusy.value) return
+  await saveQnaPlanNotes()
+  await runNextRound(true)
+}
+
 async function runNextRound(force = false) {
   if (!activeWorkspace.value || !selectedSlug.value) return
   if (qnaLocked.value) return
   if (!force && qnaComplete.value) return
   if (!qnaState.value) return
+  await saveQnaPlanNotes()
   await commitCurrentRound()
   const nextRoundNumber = (qnaState.value?.rounds?.length ?? 0) + 1
   const images = extractWorkspaceImagePaths(qnaMarkdown.value)
@@ -813,7 +882,10 @@ async function runNextRound(force = false) {
     model: planningModelValue.value || undefined,
     modelReasoningEffort: planningThinkingValue.value || undefined,
     oneShotNetwork: planningProfileId.value === 'careful' ? oneShotNetwork.value : undefined,
-    input: inputWithImages(buildPlanningNextRoundPrompt({ featureSlug: selectedSlug.value, nextRoundNumber }), images),
+    input: inputWithImages(
+      buildPlanningNextRoundPrompt({ featureSlug: selectedSlug.value, nextRoundNumber, additionalNotes: qnaPlanNotes.value }),
+      images
+    ),
     outputSchema: PLAN_NEXT_ROUND_SCHEMA,
   })
   activeRunId.value = runId
@@ -875,7 +947,10 @@ async function regenerateLatestRound() {
     model: planningModelValue.value || undefined,
     modelReasoningEffort: planningThinkingValue.value || undefined,
     oneShotNetwork: planningProfileId.value === 'careful' ? oneShotNetwork.value : undefined,
-    input: inputWithImages(buildPlanningNextRoundPrompt({ featureSlug: selectedSlug.value, nextRoundNumber }), images),
+    input: inputWithImages(
+      buildPlanningNextRoundPrompt({ featureSlug: selectedSlug.value, nextRoundNumber, additionalNotes: nextState.notes }),
+      images
+    ),
     outputSchema: PLAN_NEXT_ROUND_SCHEMA,
   })
   activeRunId.value = runId
@@ -1618,6 +1693,56 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
   showToast('Image attached')
 }
 
+async function onPasteQnaPlanNotes(e: ClipboardEvent) {
+  if (!activeWorkspace.value || !selectedSlug.value) return
+  if (qnaLocked.value || isRunBusy.value) return
+  const dt = e.clipboardData
+  if (!dt) return
+  debugPaste(`qna-notes`, e)
+
+  const file = findImageFile(dt)
+  const html = dt.getData('text/html')
+  const text = dt.getData('text/plain')
+  const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+
+  if (!file && !dataUrlFromText) {
+    e.preventDefault()
+    const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
+    const parsed = parseImageDataUrl(clipUrl || '')
+    if (!parsed) {
+      pastePlainTextIntoTarget(e, text || '')
+      return
+    }
+
+    const saved = await window.codexDesigner!.saveAttachment({
+      workspacePath: activeWorkspace.value.path,
+      featureSlug: selectedSlug.value,
+      ext: parsed.ext,
+      bytesBase64: parsed.bytesBase64,
+    })
+
+    pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
+    showToast('Image attached')
+    return
+  }
+
+  e.preventDefault()
+
+  const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
+  const parsed = parseImageDataUrl(dataUrl)
+  if (!parsed) return
+
+  const saved = await window.codexDesigner!.saveAttachment({
+    workspacePath: activeWorkspace.value.path,
+    featureSlug: selectedSlug.value,
+    ext: parsed.ext,
+    bytesBase64: parsed.bytesBase64,
+  })
+
+  pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
+  showToast('Image attached')
+}
+
 async function onPasteImplementationFollowup(e: ClipboardEvent) {
   if (!activeWorkspace.value || !selectedSlug.value) return
   if (isRunBusy.value) return
@@ -1702,6 +1827,13 @@ function removeAttachmentRefsFromText(text: string, relPath: string): string {
 async function removeQnaDraftAttachment(qId: string, relPath: string) {
   const existing = String(draftNotes.value[qId] ?? '')
   draftNotes.value[qId] = removeAttachmentRefsFromText(existing, relPath)
+  await deleteAttachmentIfPossible(relPath)
+  showToast('Image removed')
+}
+
+async function removeQnaPlanNotesAttachment(relPath: string) {
+  const existing = String(qnaPlanNotes.value ?? '')
+  qnaPlanNotes.value = removeAttachmentRefsFromText(existing, relPath)
   await deleteAttachmentIfPossible(relPath)
   showToast('Image removed')
 }
@@ -2246,6 +2378,57 @@ watch(
               </div>
 
               <div v-else class="mt-4 space-y-4">
+                <div class="rounded-2xl border border-gray-200 bg-gray-50 p-3 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Additional notes</div>
+                      <div class="mt-1 text-sm font-bold">New requirements / clarifications</div>
+                      <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                        Use this when you notice gaps while reading the plan. Clicking “Clarify with Q&amp;A” treats these as new requirements
+                        and generates a fresh follow-up round.
+                      </p>
+                    </div>
+                    <button
+                      class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
+                      type="button"
+                      :disabled="qnaLocked || isRunBusy || !qnaPlanNotes.trim().length"
+                      @click="runPlanNotesRound"
+                    >
+                      <span class="material-symbols-rounded text-[18px]">autorenew</span>
+                      Clarify with Q&amp;A
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="qnaPlanNotesError"
+                    class="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200"
+                  >
+                    {{ qnaPlanNotesError }}
+                  </div>
+
+                  <div
+                    v-if="activeWorkspace && extractWorkspaceImagePaths(qnaPlanNotes).length"
+                    class="mt-3"
+                  >
+                    <AttachmentPreviews
+                      :workspace-path="activeWorkspace.path"
+                      :attachments="extractWorkspaceImagePaths(qnaPlanNotes)"
+                      :max="6"
+                      allow-remove
+                      @remove="(rel) => removeQnaPlanNotesAttachment(rel)"
+                    />
+                  </div>
+
+                  <AutoGrowTextarea
+                    v-model="qnaPlanNotes"
+                    :min-rows="3"
+                    class="mt-3 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                    placeholder="Add clarifications or new requirements. Paste images here."
+                    :disabled="qnaLocked || isRunBusy"
+                    @paste="onPasteQnaPlanNotes($event as ClipboardEvent)"
+                  />
+                </div>
+
                 <div
                   v-for="round in qnaRounds"
                   :key="round.id"

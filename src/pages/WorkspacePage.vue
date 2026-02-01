@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
+import { listCodexModels, type CodexModelInfo } from '../lib/models'
+import type { ModelReasoningEffort } from '../lib/runStore'
 
 const {
   appState,
@@ -17,6 +19,17 @@ const {
 const router = useRouter()
 
 const recent = computed(() => appState.value?.recentWorkspacePaths ?? [])
+
+type WorkspaceRunDefaults = {
+  model?: string
+  modelReasoningEffort?: ModelReasoningEffort | ''
+}
+
+type WorkspaceRunDefaultsByRole = {
+  planning?: WorkspaceRunDefaults
+  implementation?: WorkspaceRunDefaults
+  newWork?: WorkspaceRunDefaults
+}
 
 type WorkspaceProfilesFile = {
   version: 1
@@ -38,6 +51,147 @@ const profilesError = ref<string | null>(null)
 const profiles = ref<WorkspaceProfilesFile | null>(null)
 const carefulProfile = computed(() => profiles.value?.profiles.find((p) => p.id === 'careful') ?? null)
 const yoloProfile = computed(() => profiles.value?.profiles.find((p) => p.id === 'yolo') ?? null)
+
+const codexModels = ref<CodexModelInfo[]>([])
+const modelsLoading = ref(false)
+const modelsError = ref<string | null>(null)
+
+async function refreshModels(forceRefresh = false) {
+  modelsLoading.value = true
+  modelsError.value = null
+  try {
+    codexModels.value = await listCodexModels({ forceRefresh })
+  } catch (e) {
+    codexModels.value = []
+    modelsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    modelsLoading.value = false
+  }
+}
+
+const planningModelChoice = ref<string>('default')
+const planningModelCustom = ref<string>('')
+const planningModelValue = computed(() => {
+  if (planningModelChoice.value === 'default') return ''
+  if (planningModelChoice.value === 'custom') return planningModelCustom.value.trim()
+  return planningModelChoice.value
+})
+const planningThinkingChoice = ref<'default' | ModelReasoningEffort>('default')
+const planningThinkingValue = computed(() => {
+  if (planningThinkingChoice.value === 'default') return ''
+  return planningThinkingChoice.value
+})
+
+const implementationModelChoice = ref<string>('default')
+const implementationModelCustom = ref<string>('')
+const implementationModelValue = computed(() => {
+  if (implementationModelChoice.value === 'default') return ''
+  if (implementationModelChoice.value === 'custom') return implementationModelCustom.value.trim()
+  return implementationModelChoice.value
+})
+const implementationThinkingChoice = ref<'default' | ModelReasoningEffort>('default')
+const implementationThinkingValue = computed(() => {
+  if (implementationThinkingChoice.value === 'default') return ''
+  return implementationThinkingChoice.value
+})
+
+const newWorkModelChoice = ref<string>('default')
+const newWorkModelCustom = ref<string>('')
+const newWorkModelValue = computed(() => {
+  if (newWorkModelChoice.value === 'default') return ''
+  if (newWorkModelChoice.value === 'custom') return newWorkModelCustom.value.trim()
+  return newWorkModelChoice.value
+})
+const newWorkThinkingChoice = ref<'default' | ModelReasoningEffort>('default')
+const newWorkThinkingValue = computed(() => {
+  if (newWorkThinkingChoice.value === 'default') return ''
+  return newWorkThinkingChoice.value
+})
+
+function applyModelChoiceFromValue(
+  modelValue: string | undefined,
+  targetChoice: { value: string },
+  targetCustom: { value: string }
+) {
+  const raw = String(modelValue ?? '').trim()
+  if (!raw) {
+    targetChoice.value = 'default'
+    targetCustom.value = ''
+    return
+  }
+  const known = codexModels.value.some((m) => m.model === raw)
+  if (known) {
+    targetChoice.value = raw
+    targetCustom.value = ''
+    return
+  }
+  targetChoice.value = 'custom'
+  targetCustom.value = raw
+}
+
+function applyThinkingChoiceFromValue(value: string | undefined, targetChoice: { value: 'default' | ModelReasoningEffort }) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    targetChoice.value = 'default'
+    return
+  }
+  const allowed: Array<ModelReasoningEffort> = ['minimal', 'low', 'medium', 'high', 'xhigh']
+  if (allowed.includes(raw as ModelReasoningEffort)) {
+    targetChoice.value = raw as ModelReasoningEffort
+    return
+  }
+  targetChoice.value = 'default'
+}
+
+let suppressWorkspaceRunDefaultsAutosave = false
+let workspaceRunDefaultsSaveTimer: number | null = null
+const workspaceRunDefaultsError = ref<string | null>(null)
+
+async function loadWorkspaceRunDefaults(workspacePath: string) {
+  try {
+    const defaults = (await window.codexDesigner?.getWorkspaceRunDefaults?.(workspacePath)) as WorkspaceRunDefaultsByRole | null
+    suppressWorkspaceRunDefaultsAutosave = true
+
+    applyModelChoiceFromValue(defaults?.planning?.model, planningModelChoice, planningModelCustom)
+    applyThinkingChoiceFromValue(defaults?.planning?.modelReasoningEffort, planningThinkingChoice)
+
+    applyModelChoiceFromValue(defaults?.implementation?.model, implementationModelChoice, implementationModelCustom)
+    applyThinkingChoiceFromValue(defaults?.implementation?.modelReasoningEffort, implementationThinkingChoice)
+
+    applyModelChoiceFromValue(defaults?.newWork?.model, newWorkModelChoice, newWorkModelCustom)
+    applyThinkingChoiceFromValue(defaults?.newWork?.modelReasoningEffort, newWorkThinkingChoice)
+  } finally {
+    queueMicrotask(() => {
+      suppressWorkspaceRunDefaultsAutosave = false
+    })
+  }
+}
+
+async function saveWorkspaceRunDefaults() {
+  if (!activeWorkspace.value) return
+  const payload: WorkspaceRunDefaultsByRole = {
+    planning: { model: planningModelValue.value || '', modelReasoningEffort: (planningThinkingValue.value as ModelReasoningEffort | '') || '' },
+    implementation: {
+      model: implementationModelValue.value || '',
+      modelReasoningEffort: (implementationThinkingValue.value as ModelReasoningEffort | '') || '',
+    },
+    newWork: { model: newWorkModelValue.value || '', modelReasoningEffort: (newWorkThinkingValue.value as ModelReasoningEffort | '') || '' },
+  }
+  await window.codexDesigner?.setWorkspaceRunDefaults?.(activeWorkspace.value.path, payload)
+}
+
+function scheduleWorkspaceRunDefaultsSave() {
+  if (!activeWorkspace.value) return
+  if (suppressWorkspaceRunDefaultsAutosave) return
+  if (workspaceRunDefaultsSaveTimer) window.clearTimeout(workspaceRunDefaultsSaveTimer)
+  workspaceRunDefaultsSaveTimer = window.setTimeout(() => {
+    workspaceRunDefaultsSaveTimer = null
+    workspaceRunDefaultsError.value = null
+    void saveWorkspaceRunDefaults().catch((e) => {
+      workspaceRunDefaultsError.value = e instanceof Error ? e.message : String(e)
+    })
+  }, 400)
+}
 
 async function loadProfiles() {
   if (!activeWorkspace.value) return
@@ -126,7 +280,35 @@ function openFeature(slug: string) {
 
 onMounted(() => {
   refreshAppState()
+  void refreshModels()
 })
+
+watch(
+  () => activeWorkspace.value?.path ?? null,
+  (p) => {
+    if (!p) return
+    void loadWorkspaceRunDefaults(p).catch(() => {})
+  },
+  { immediate: true }
+)
+
+watch(
+  () => codexModels.value.map((m) => m.model).join('|'),
+  () => {
+    if (!activeWorkspace.value) return
+    void loadWorkspaceRunDefaults(activeWorkspace.value.path).catch(() => {})
+  }
+)
+
+watch(
+  () => ({
+    planning: { model: planningModelValue.value, thinking: planningThinkingValue.value },
+    implementation: { model: implementationModelValue.value, thinking: implementationThinkingValue.value },
+    newWork: { model: newWorkModelValue.value, thinking: newWorkThinkingValue.value },
+  }),
+  () => scheduleWorkspaceRunDefaultsSave(),
+  { deep: true }
+)
 </script>
 
 <template>
@@ -318,6 +500,184 @@ onMounted(() => {
                   <span class="material-symbols-rounded text-[18px]">tune</span>
                   Edit
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Run defaults</div>
+            <div class="mt-1 text-sm font-bold">Default model + thinking level</div>
+            <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+              Used for Planning / Implementation / New work runs in this workspace.
+            </p>
+          </div>
+
+          <button
+            class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
+            type="button"
+            :disabled="modelsLoading"
+            @click="refreshModels(true)"
+          >
+            <span class="material-symbols-rounded text-[18px]">refresh</span>
+            Refresh models
+          </button>
+        </div>
+
+        <div
+          v-if="modelsError || workspaceRunDefaultsError"
+          class="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200"
+        >
+          {{ workspaceRunDefaultsError || modelsError }}
+        </div>
+
+        <div class="mt-4 grid gap-3 lg:grid-cols-3">
+          <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+            <div class="flex items-center gap-2 text-sm font-black">
+              <span class="material-symbols-rounded text-[18px] text-brand-500">chat</span>
+              Planning
+            </div>
+
+            <div class="mt-3 space-y-3">
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Model</div>
+                <select
+                  v-model="planningModelChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default model</option>
+                  <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                    {{ m.displayName }}{{ m.isDefault ? ' (default)' : '' }}
+                  </option>
+                  <option value="custom">Custom…</option>
+                </select>
+
+                <input
+                  v-if="planningModelChoice === 'custom'"
+                  v-model="planningModelCustom"
+                  type="text"
+                  placeholder="model id"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                />
+              </div>
+
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Thinking</div>
+                <select
+                  v-model="planningThinkingChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+            <div class="flex items-center gap-2 text-sm font-black">
+              <span class="material-symbols-rounded text-[18px] text-brand-500">build</span>
+              Implementation
+            </div>
+
+            <div class="mt-3 space-y-3">
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Model</div>
+                <select
+                  v-model="implementationModelChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default model</option>
+                  <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                    {{ m.displayName }}{{ m.isDefault ? ' (default)' : '' }}
+                  </option>
+                  <option value="custom">Custom…</option>
+                </select>
+
+                <input
+                  v-if="implementationModelChoice === 'custom'"
+                  v-model="implementationModelCustom"
+                  type="text"
+                  placeholder="model id"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                />
+              </div>
+
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Thinking</div>
+                <select
+                  v-model="implementationThinkingChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+            <div class="flex items-center gap-2 text-sm font-black">
+              <span class="material-symbols-rounded text-[18px] text-brand-500">add_circle</span>
+              New work
+            </div>
+
+            <div class="mt-3 space-y-3">
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Model</div>
+                <select
+                  v-model="newWorkModelChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default model</option>
+                  <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                    {{ m.displayName }}{{ m.isDefault ? ' (default)' : '' }}
+                  </option>
+                  <option value="custom">Custom…</option>
+                </select>
+
+                <input
+                  v-if="newWorkModelChoice === 'custom'"
+                  v-model="newWorkModelCustom"
+                  type="text"
+                  placeholder="model id"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                />
+              </div>
+
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Thinking</div>
+                <select
+                  v-model="newWorkThinkingChoice"
+                  class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
+                  :disabled="loading"
+                >
+                  <option value="default">Default</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                </select>
               </div>
             </div>
           </div>

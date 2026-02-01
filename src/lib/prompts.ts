@@ -60,9 +60,11 @@ You must produce:
 export function buildPlanningNextRoundPrompt(args: {
   featureSlug: string
   nextRoundNumber: number
+  additionalNotes?: string
 }): string {
   const slug = args.featureSlug
   const nextRound = Math.max(1, Math.floor(args.nextRoundNumber || 1))
+  const additionalNotes = String(args.additionalNotes ?? '').trim()
 
   const wrapUpMode = nextRound >= 6
   const finalStretch = nextRound >= 9
@@ -81,6 +83,15 @@ export function buildPlanningNextRoundPrompt(args: {
 ${hardStop ? '- Hard stop: do not ask more questions; finalize the plan and return an empty questions list.\n' : ''}`
     : ''
 
+  const notesBlock = additionalNotes
+    ? `
+
+## Additional notes (new requirements)
+The user added these notes while reviewing the plan. Treat them as incremental requirements/clarifications:
+${additionalNotes}
+`
+    : ''
+
   return `You are codex-designer. The user has answered the current Q&A.
 
 Return ONLY valid JSON matching the provided output schema (no markdown fences, no extra keys, no commentary).
@@ -90,12 +101,15 @@ Return ONLY valid JSON matching the provided output schema (no markdown fences, 
 - Update \`docs/${slug}.plan.md\` so it fully incorporates confirmed decisions and requirements.
 - \`planMarkdown\` MUST be the full, complete contents for \`docs/${slug}.plan.md\` (not a diff).
 - Generate ONLY the next set of follow-up questions as a single round object to append to \`docs/${slug}.qna.json\`.
+${notesBlock}
 
 ## Follow-up rules (deterministic)
 - Ask only high-signal questions that are still genuinely ambiguous.
 - Do not ask "obvious" questions that can be inferred from the brief, plan, or prior rounds.
 - Never ask duplicates of earlier questions (including reworded duplicates).
 - Prefer documenting assumptions/decisions in the plan over asking another question.
+- If "Additional notes" is present, prioritize clarifying those items before anything else.
+- If "Additional notes" is present and any item is ambiguous, ask at least 1 follow-up question this round.
 - Target follow-up count this round: 0–${followUpCap}. Zero is allowed when planning is complete.
 - Each question MUST include 3–6 multiple-choice options and a recommended default.
 - Do not rewrite or duplicate earlier rounds.

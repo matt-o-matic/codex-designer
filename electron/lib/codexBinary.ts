@@ -1,5 +1,10 @@
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+function toAsarUnpackedPath(p: string): string {
+  return p.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2')
+}
 
 export function findCodexBinaryPath(): string {
   const resolveFn: ((specifier: string) => string) | undefined = (import.meta as any).resolve
@@ -32,8 +37,15 @@ export function findCodexBinaryPath(): string {
   }
   if (!targetTriple) throw new Error(`Unsupported platform: ${platform} (${arch})`)
 
-  const vendorRoot = path.join(sdkDistDir, '..', 'vendor')
+  const vendorRoot = toAsarUnpackedPath(path.join(sdkDistDir, '..', 'vendor'))
   const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex'
-  return path.join(vendorRoot, targetTriple, 'codex', codexBinaryName)
-}
+  const candidate = path.join(vendorRoot, targetTriple, 'codex', codexBinaryName)
 
+  // In dev mode, or if the app isn't packaged into asar, the above should already exist.
+  // In packaged mode, the vendor folder must be unpacked (asarUnpack) so the binary is executable.
+  if (existsSync(candidate)) return candidate
+
+  // Fallback: if the vendor folder was not unpacked, return the candidate path anyway so callers
+  // can surface a useful error (instead of crashing on existsSync assumptions).
+  return candidate
+}

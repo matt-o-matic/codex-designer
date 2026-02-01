@@ -32,11 +32,12 @@ export type QnaStateV1 = {
   version: 1
   featureSlug: string
   updatedAt: string
+  notes: string
   rounds: QnaRoundV1[]
 }
 
 export function createEmptyQnaStateV1(featureSlug: string): QnaStateV1 {
-  return { version: 1, featureSlug, updatedAt: new Date().toISOString(), rounds: [] }
+  return { version: 1, featureSlug, updatedAt: new Date().toISOString(), notes: '', rounds: [] }
 }
 
 export function parseQnaStateJson(raw: string): QnaStateV1 | null {
@@ -50,12 +51,19 @@ export function parseQnaStateJson(raw: string): QnaStateV1 | null {
   if (typeof parsed.featureSlug !== 'string' || !parsed.featureSlug.trim().length) return null
   if (typeof parsed.updatedAt !== 'string') return null
   if (!Array.isArray(parsed.rounds)) return null
+
+  if (typeof parsed.notes !== 'string') parsed.notes = ''
   return parsed as QnaStateV1
 }
 
 export function normalizeQnaStateV1(input: QnaStateV1): { state: QnaStateV1; changed: boolean } {
   let changed = false
   const state: QnaStateV1 = structuredClone(input)
+
+  if (typeof (state as any).notes !== 'string') {
+    ;(state as any).notes = ''
+    changed = true
+  }
 
   for (const round of state.rounds) {
     for (const q of round.questions) {
@@ -160,6 +168,14 @@ export function renderQnaMarkdownFromState(state: QnaStateV1): string {
   lines.push('')
   lines.push(`Related plan: \`docs/${slug}.plan.md\``)
   lines.push('')
+
+  const notes = normalizeLineEndings(state.notes ?? '').trimEnd()
+  if (notes.trim().length) {
+    lines.push('## Notes')
+    lines.push('')
+    lines.push(notes)
+    lines.push('')
+  }
 
   for (const round of state.rounds) {
     lines.push(`## ${round.title}`)
