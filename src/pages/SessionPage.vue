@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef, toRaw, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
 import { parseQnaMarkdown } from '../lib/qna'
@@ -1201,7 +1201,6 @@ function showToast(message: string, ttlMs = 1800) {
 
 const CLIPBOARD_DEBUG_KEY = 'codex-designer:clipboard-debug'
 const clipboardDebug = ref(false)
-let clipboardDebugTicker: ReturnType<typeof setInterval> | null = null
 
 try {
   clipboardDebug.value = localStorage.getItem(CLIPBOARD_DEBUG_KEY) === '1'
@@ -1209,23 +1208,14 @@ try {
   // ignore
 }
 
-function startClipboardDebugTicker() {
-  if (clipboardDebugTicker) return
-  clipboardDebugTicker = setInterval(async () => {
-    try {
-      const formats = await window.codexDesigner?.getClipboardFormats?.()
-      const line = Array.isArray(formats) && formats.length ? formats.join(', ') : '(none)'
-      console.log(`[clipboard-debug] ${new Date().toISOString()} formats: ${line}`)
-    } catch (e) {
-      console.log(`[clipboard-debug] ${new Date().toISOString()} formats: (error)`, e)
-    }
-  }, 10_000)
-}
-
-function stopClipboardDebugTicker() {
-  if (!clipboardDebugTicker) return
-  clearInterval(clipboardDebugTicker)
-  clipboardDebugTicker = null
+async function logClipboardFormats(tag = 'clipboard-debug') {
+  try {
+    const formats = await window.codexDesigner?.getClipboardFormats?.()
+    const line = Array.isArray(formats) && formats.length ? formats.join(', ') : '(none)'
+    console.log(`[${tag}] ${new Date().toISOString()} formats: ${line}`)
+  } catch (e) {
+    console.log(`[${tag}] ${new Date().toISOString()} formats: (error)`, e)
+  }
 }
 
 watch(
@@ -1239,18 +1229,13 @@ watch(
 
     if (v) {
       console.log('[clipboard-debug] enabled')
-      startClipboardDebugTicker()
+      void logClipboardFormats()
     } else {
       console.log('[clipboard-debug] disabled')
-      stopClipboardDebugTicker()
     }
   },
   { immediate: true }
 )
-
-onUnmounted(() => {
-  stopClipboardDebugTicker()
-})
 
 function debugPaste(label: string, e: ClipboardEvent) {
   if (!clipboardDebug.value) return
@@ -1275,10 +1260,7 @@ function debugPaste(label: string, e: ClipboardEvent) {
     if (preview) console.log(`[paste-debug:${label}] text/html (first 200 chars):`, preview.slice(0, 200))
   }
 
-  void window.codexDesigner?.getClipboardFormats?.().then((formats) => {
-    const line = Array.isArray(formats) && formats.length ? formats.join(', ') : '(none)'
-    console.log(`[paste-debug:${label}] electron clipboard formats: ${line}`)
-  })
+  void logClipboardFormats(`paste-debug:${label}`)
 }
 
 function findImageFile(dt: DataTransfer): File | null {
@@ -1321,6 +1303,52 @@ function parseImageDataUrl(dataUrl: string): { mime: string; bytesBase64: string
   return { mime, bytesBase64, ext }
 }
 
+async function convertImageDataUrlToPng(dataUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(bitmap, 0, 0)
+
+    const pngBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((b) => resolve(b), 'image/png')
+    })
+    if (!pngBlob) return null
+
+    const pngDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(new Error('Failed to read PNG blob'))
+      reader.readAsDataURL(pngBlob)
+    })
+    return pngDataUrl.startsWith('data:image/png;base64,') ? pngDataUrl : null
+  } catch {
+    return null
+  }
+}
+
+async function normalizeClipboardImageForSaving(
+  dataUrl: string
+): Promise<{ ext: string; bytesBase64: string } | null> {
+  const parsed = parseImageDataUrl(dataUrl)
+  if (!parsed) return null
+
+  if (parsed.mime.toLowerCase() === 'image/bmp') {
+    const converted = await convertImageDataUrlToPng(dataUrl)
+    if (converted) {
+      const pngParsed = parseImageDataUrl(converted)
+      if (pngParsed) return { ext: 'png', bytesBase64: pngParsed.bytesBase64 }
+    }
+  }
+
+  return { ext: parsed.ext, bytesBase64: parsed.bytesBase64 }
+}
+
 function pastePlainTextIntoTarget(e: ClipboardEvent, text: string) {
   const target = e.target
   if (!target || typeof (target as { value?: unknown }).value !== 'string') return
@@ -1348,12 +1376,18 @@ async function onPasteFeedback(e: ClipboardEvent, testId: string) {
   const html = dt.getData('text/html')
   const text = dt.getData('text/plain')
   const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+  const hasText = String(text || '').trim().length > 0
+  const hasHtml = String(html || '').trim().length > 0
+  const htmlLooksImagey = /<img\b/i.test(String(html || ''))
 
   if (!file && !dataUrlFromText) {
+    // Let normal text/rich-text pastes behave normally (no clipboard IPC).
+    if (hasText || (hasHtml && !htmlLooksImagey)) return
+
     e.preventDefault()
     const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
-    const parsed = parseImageDataUrl(clipUrl || '')
-    if (!parsed) {
+    const normalized = await normalizeClipboardImageForSaving(clipUrl || '')
+    if (!normalized) {
       pastePlainTextIntoTarget(e, text || '')
       return
     }
@@ -1361,8 +1395,8 @@ async function onPasteFeedback(e: ClipboardEvent, testId: string) {
     const saved = await window.codexDesigner!.saveAttachment({
       workspacePath: activeWorkspace.value.path,
       featureSlug: selectedSlug.value,
-      ext: parsed.ext,
-      bytesBase64: parsed.bytesBase64,
+      ext: normalized.ext,
+      bytesBase64: normalized.bytesBase64,
     })
 
     const r = getResult(testId)
@@ -1377,14 +1411,14 @@ async function onPasteFeedback(e: ClipboardEvent, testId: string) {
   e.preventDefault()
 
   const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
-  const parsed = parseImageDataUrl(dataUrl)
-  if (!parsed) return
+  const normalized = await normalizeClipboardImageForSaving(dataUrl)
+  if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
     workspacePath: activeWorkspace.value.path,
     featureSlug: selectedSlug.value,
-    ext: parsed.ext,
-    bytesBase64: parsed.bytesBase64,
+    ext: normalized.ext,
+    bytesBase64: normalized.bytesBase64,
   })
 
   const r = getResult(testId)
@@ -1580,12 +1614,6 @@ function openNewWorkModal() {
 
 async function onPasteNewWork(e: ClipboardEvent) {
   if (!activeWorkspace.value) return
-  const slug = newWorkSlug.value.trim()
-  if (!slug) {
-    newWorkAttachmentError.value = 'Enter a feature slug before pasting images.'
-    return
-  }
-
   const dt = e.clipboardData
   if (!dt) return
   debugPaste('new-work', e)
@@ -1594,13 +1622,25 @@ async function onPasteNewWork(e: ClipboardEvent) {
   const html = dt.getData('text/html')
   const text = dt.getData('text/plain')
   const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+  const hasText = String(text || '').trim().length > 0
+  const hasHtml = String(html || '').trim().length > 0
+  const htmlLooksImagey = /<img\b/i.test(String(html || ''))
+
+  // Let normal text/rich-text pastes behave normally (no clipboard IPC).
+  if (!file && !dataUrlFromText && (hasText || (hasHtml && !htmlLooksImagey))) return
+
+  const slug = newWorkSlug.value.trim()
+  if (!slug) {
+    newWorkAttachmentError.value = 'Enter a feature slug before pasting images.'
+    return
+  }
 
   if (!file && !dataUrlFromText) {
     e.preventDefault()
     newWorkAttachmentError.value = null
     const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
-    const parsed = parseImageDataUrl(clipUrl || '')
-    if (!parsed) {
+    const normalized = await normalizeClipboardImageForSaving(clipUrl || '')
+    if (!normalized) {
       pastePlainTextIntoTarget(e, text || '')
       return
     }
@@ -1608,8 +1648,8 @@ async function onPasteNewWork(e: ClipboardEvent) {
     const saved = await window.codexDesigner!.saveAttachment({
       workspacePath: activeWorkspace.value.path,
       featureSlug: slug,
-      ext: parsed.ext,
-      bytesBase64: parsed.bytesBase64,
+      ext: normalized.ext,
+      bytesBase64: normalized.bytesBase64,
     })
 
     newWorkAttachments.value.push(saved.relPath)
@@ -1621,14 +1661,14 @@ async function onPasteNewWork(e: ClipboardEvent) {
   newWorkAttachmentError.value = null
 
   const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
-  const parsed = parseImageDataUrl(dataUrl)
-  if (!parsed) return
+  const normalized = await normalizeClipboardImageForSaving(dataUrl)
+  if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
     workspacePath: activeWorkspace.value.path,
     featureSlug: slug,
-    ext: parsed.ext,
-    bytesBase64: parsed.bytesBase64,
+    ext: normalized.ext,
+    bytesBase64: normalized.bytesBase64,
   })
 
   newWorkAttachments.value.push(saved.relPath)
@@ -1646,12 +1686,18 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
   const html = dt.getData('text/html')
   const text = dt.getData('text/plain')
   const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+  const hasText = String(text || '').trim().length > 0
+  const hasHtml = String(html || '').trim().length > 0
+  const htmlLooksImagey = /<img\b/i.test(String(html || ''))
 
   if (!file && !dataUrlFromText) {
+    // Let normal text/rich-text pastes behave normally (no clipboard IPC).
+    if (hasText || (hasHtml && !htmlLooksImagey)) return
+
     e.preventDefault()
     const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
-    const parsed = parseImageDataUrl(clipUrl || '')
-    if (!parsed) {
+    const normalized = await normalizeClipboardImageForSaving(clipUrl || '')
+    if (!normalized) {
       pastePlainTextIntoTarget(e, text || '')
       return
     }
@@ -1659,8 +1705,8 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
     const saved = await window.codexDesigner!.saveAttachment({
       workspacePath: activeWorkspace.value.path,
       featureSlug: selectedSlug.value,
-      ext: parsed.ext,
-      bytesBase64: parsed.bytesBase64,
+      ext: normalized.ext,
+      bytesBase64: normalized.bytesBase64,
     })
 
     const rel = saved.relPath
@@ -1675,14 +1721,14 @@ async function onPasteQnaAnswer(e: ClipboardEvent, qId: string) {
   e.preventDefault()
 
   const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
-  const parsed = parseImageDataUrl(dataUrl)
-  if (!parsed) return
+  const normalized = await normalizeClipboardImageForSaving(dataUrl)
+  if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
     workspacePath: activeWorkspace.value.path,
     featureSlug: selectedSlug.value,
-    ext: parsed.ext,
-    bytesBase64: parsed.bytesBase64,
+    ext: normalized.ext,
+    bytesBase64: normalized.bytesBase64,
   })
 
   const rel = saved.relPath
@@ -1704,12 +1750,18 @@ async function onPasteQnaPlanNotes(e: ClipboardEvent) {
   const html = dt.getData('text/html')
   const text = dt.getData('text/plain')
   const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+  const hasText = String(text || '').trim().length > 0
+  const hasHtml = String(html || '').trim().length > 0
+  const htmlLooksImagey = /<img\b/i.test(String(html || ''))
 
   if (!file && !dataUrlFromText) {
+    // Let normal text/rich-text pastes behave normally (no clipboard IPC).
+    if (hasText || (hasHtml && !htmlLooksImagey)) return
+
     e.preventDefault()
     const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
-    const parsed = parseImageDataUrl(clipUrl || '')
-    if (!parsed) {
+    const normalized = await normalizeClipboardImageForSaving(clipUrl || '')
+    if (!normalized) {
       pastePlainTextIntoTarget(e, text || '')
       return
     }
@@ -1717,8 +1769,8 @@ async function onPasteQnaPlanNotes(e: ClipboardEvent) {
     const saved = await window.codexDesigner!.saveAttachment({
       workspacePath: activeWorkspace.value.path,
       featureSlug: selectedSlug.value,
-      ext: parsed.ext,
-      bytesBase64: parsed.bytesBase64,
+      ext: normalized.ext,
+      bytesBase64: normalized.bytesBase64,
     })
 
     pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
@@ -1729,14 +1781,14 @@ async function onPasteQnaPlanNotes(e: ClipboardEvent) {
   e.preventDefault()
 
   const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
-  const parsed = parseImageDataUrl(dataUrl)
-  if (!parsed) return
+  const normalized = await normalizeClipboardImageForSaving(dataUrl)
+  if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
     workspacePath: activeWorkspace.value.path,
     featureSlug: selectedSlug.value,
-    ext: parsed.ext,
-    bytesBase64: parsed.bytesBase64,
+    ext: normalized.ext,
+    bytesBase64: normalized.bytesBase64,
   })
 
   pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
@@ -1754,12 +1806,18 @@ async function onPasteImplementationFollowup(e: ClipboardEvent) {
   const html = dt.getData('text/html')
   const text = dt.getData('text/plain')
   const dataUrlFromText = extractDataUrlImage(html) ?? extractDataUrlImage(text)
+  const hasText = String(text || '').trim().length > 0
+  const hasHtml = String(html || '').trim().length > 0
+  const htmlLooksImagey = /<img\b/i.test(String(html || ''))
 
   if (!file && !dataUrlFromText) {
+    // Let normal text/rich-text pastes behave normally (no clipboard IPC).
+    if (hasText || (hasHtml && !htmlLooksImagey)) return
+
     e.preventDefault()
     const clipUrl = await window.codexDesigner?.readClipboardImageDataUrl?.()
-    const parsed = parseImageDataUrl(clipUrl || '')
-    if (!parsed) {
+    const normalized = await normalizeClipboardImageForSaving(clipUrl || '')
+    if (!normalized) {
       pastePlainTextIntoTarget(e, text || '')
       return
     }
@@ -1767,8 +1825,8 @@ async function onPasteImplementationFollowup(e: ClipboardEvent) {
     const saved = await window.codexDesigner!.saveAttachment({
       workspacePath: activeWorkspace.value.path,
       featureSlug: selectedSlug.value,
-      ext: parsed.ext,
-      bytesBase64: parsed.bytesBase64,
+      ext: normalized.ext,
+      bytesBase64: normalized.bytesBase64,
     })
 
     pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
@@ -1779,14 +1837,14 @@ async function onPasteImplementationFollowup(e: ClipboardEvent) {
   e.preventDefault()
 
   const dataUrl = dataUrlFromText ?? (file ? await readFileAsDataUrl(file) : '')
-  const parsed = parseImageDataUrl(dataUrl)
-  if (!parsed) return
+  const normalized = await normalizeClipboardImageForSaving(dataUrl)
+  if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
     workspacePath: activeWorkspace.value.path,
     featureSlug: selectedSlug.value,
-    ext: parsed.ext,
-    bytesBase64: parsed.bytesBase64,
+    ext: normalized.ext,
+    bytesBase64: normalized.bytesBase64,
   })
 
   pastePlainTextIntoTarget(e, `![pasted image](${saved.relPath})`)
@@ -2167,7 +2225,7 @@ watch(
               <div class="flex flex-wrap items-center gap-2">
                 <label
                   class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
-                  title="Logs clipboard formats every 10s + logs paste payloads when you paste into a notes field"
+                  title="Logs paste payloads (and clipboard formats) when you paste into a notes field"
                 >
                   <input v-model="clipboardDebug" type="checkbox" class="h-4 w-4 accent-brand-600" />
                   Clipboard debug
@@ -3100,8 +3158,8 @@ watch(
     <!-- New work modal -->
     <div v-if="newWorkOpen" class="fixed inset-0 z-50">
       <button class="absolute inset-0 bg-black/50" type="button" @click="newWorkOpen = false"></button>
-      <div class="absolute left-1/2 top-1/2 w-[min(640px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-gray-200 bg-white p-4 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
-        <div class="flex items-start justify-between gap-3">
+      <div class="absolute left-1/2 top-1/2 flex max-h-[90vh] w-[min(640px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950">
+        <div class="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
           <div>
             <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">New work</div>
             <div class="mt-1 text-lg font-black tracking-tight">Create plan + Q&amp;A</div>
@@ -3119,7 +3177,8 @@ watch(
           </button>
         </div>
 
-        <div class="mt-4 grid gap-4">
+        <div class="min-h-0 flex-1 overflow-auto p-4">
+          <div class="grid gap-4">
           <div>
             <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Feature slug</div>
             <input
@@ -3294,6 +3353,7 @@ watch(
             <div class="mt-2 font-mono">run: {{ newWorkRun.runId }}</div>
             <div class="mt-1">status: {{ newWorkRun.status }}</div>
             <div v-if="newWorkRun.error" class="mt-1 text-red-700 dark:text-red-200">{{ newWorkRun.error }}</div>
+          </div>
           </div>
         </div>
       </div>
