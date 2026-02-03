@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps<{
   modelValue: string
@@ -31,7 +31,9 @@ function syncHeight() {
   const paddingBottom = Number.parseFloat(getComputedStyle(t).paddingBottom || '0') || 0
 
   const minH = minRows.value * lineHeight + paddingTop + paddingBottom
-  const maxH = maxRows.value ? maxRows.value * lineHeight + paddingTop + paddingBottom : Infinity
+  const maxByRows = maxRows.value ? maxRows.value * lineHeight + paddingTop + paddingBottom : Infinity
+  const maxByViewport = typeof window !== 'undefined' ? window.innerHeight * 0.5 : Infinity
+  const maxH = Math.min(maxByRows, maxByViewport)
   const next = Math.min(Math.max(t.scrollHeight, minH), maxH)
   t.style.height = `${Math.ceil(next)}px`
 }
@@ -51,6 +53,11 @@ watch(
 
 onMounted(() => {
   syncHeight()
+  window.addEventListener('resize', syncHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncHeight)
 })
 </script>
 
