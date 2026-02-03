@@ -221,6 +221,7 @@ export class CodexRunManager {
     const codexArgs = buildCodexExecArgs({
       images,
       threadId: resumeThreadId,
+      profileId: args.profileId,
       options: effectiveThreadOptions,
       outputSchemaPath: args.outputSchema !== undefined ? schemaFile : undefined,
     })
@@ -342,9 +343,10 @@ export class CodexRunManager {
     try {
       const codexPath = findCodexBinaryPath()
       const env = buildCodexEnv()
+      const detached = process.platform !== 'win32'
       const child = spawn(codexPath, args.args, {
         env,
-        detached: true,
+        detached,
         stdio: ['pipe', stdoutFd, stderrFd],
         windowsHide: true,
       })
@@ -494,10 +496,13 @@ function normalizeInput(input: Input, workspacePath: string): NormalizedInput {
 function buildCodexExecArgs(args: {
   images: string[]
   threadId: string | null
+  profileId: RunProfile['id']
   options: ThreadOptions
   outputSchemaPath?: string
 }): string[] {
   const commandArgs: string[] = ['exec', '--experimental-json']
+
+  if (args.profileId === 'yolo') commandArgs.push('--yolo')
 
   if (args.options.model) commandArgs.push('--model', args.options.model)
   if (args.options.sandboxMode) commandArgs.push('--sandbox', args.options.sandboxMode)
