@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
+import { parseLenientJson } from '../lib/json'
 import { parseQnaMarkdown } from '../lib/qna'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
 import {
@@ -360,12 +361,6 @@ async function waitForRunDone(runId: string, timeoutMs = 10 * 60 * 1000) {
   throw new Error('Timed out waiting for run to complete.')
 }
 
-function stripCodeFences(text: string): string {
-  const trimmed = (text ?? '').trim()
-  const m = trimmed.match(/^```[a-zA-Z0-9_-]*\s*\n([\s\S]*)\n```$/)
-  return m ? m[1] : text
-}
-
 function ensureTrailingNewline(text: string): string {
   return text.endsWith('\n') ? text : `${text}\n`
 }
@@ -425,8 +420,12 @@ async function loadArtifacts() {
   }
 
   let loadedQnaState: QnaStateV1 | null = null
+  let qnaNeedsRewrite = false
   try {
     const raw = await window.codexDesigner!.readTextFile(activeWorkspace.value.path, `docs/${selectedSlug.value}.qna.json`)
+    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+    const parsedRes = parseLenientJson(raw)
+    qnaNeedsRewrite = !!parsedRes && parsedRes.jsonText !== rawTrimmed
     loadedQnaState = parseQnaStateJson(raw)
   } catch {
     loadedQnaState = null
@@ -448,7 +447,7 @@ async function loadArtifacts() {
     }
   } else {
     const norm = normalizeQnaStateV1(loadedQnaState)
-    if (norm.changed) {
+    if (norm.changed || qnaNeedsRewrite) {
       loadedQnaState = norm.state
       await window.codexDesigner!.writeTextFile(
         activeWorkspace.value.path,
@@ -469,12 +468,27 @@ async function loadArtifacts() {
 
   await loadDraftCache()
 
+  let testNeedsRewrite = false
   try {
     const raw = await window.codexDesigner!.readTextFile(activeWorkspace.value.path, `docs/${selectedSlug.value}.test.json`)
-    testPlan.value = JSON.parse(raw) as TestPlan
+    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+    const parsed = parseLenientJson(raw)
+    if (!parsed) throw new Error('Invalid test plan JSON.')
+    testNeedsRewrite = parsed.jsonText !== rawTrimmed
+    testPlan.value = parsed.value as TestPlan
   } catch (e) {
     testPlan.value = createEmptyTestPlan(selectedSlug.value)
     testLoadError.value = null
+  }
+  if (testPlan.value) {
+    ensureRound(testPlan.value)
+    if (testNeedsRewrite) {
+      await window.codexDesigner!.writeTextFile(
+        activeWorkspace.value.path,
+        `docs/${selectedSlug.value}.test.json`,
+        JSON.stringify(testPlan.value, null, 2) + '\n'
+      )
+    }
   }
 
   try {
@@ -568,7 +582,9 @@ async function applyPlanningCreateOutput(runId: string, workspacePath: string, f
   const rec = await waitForRunDone(runId, LONG_RUN_TIMEOUT_MS)
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
-  const parsed = JSON.parse(stripCodeFences(rec.finalResponse)) as { planMarkdown: string; qna: QnaStateV1 }
+  const parsedRes = parseLenientJson(rec.finalResponse)
+  if (!parsedRes) throw new Error('Failed to parse structured output.')
+  const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
   const qnaState = normalizeQnaStateV1(parsed.qna).state
   const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n'))
   const qnaMd = renderQnaMarkdownFromState(qnaState)
@@ -583,7 +599,9 @@ async function applyPlanningNextRoundOutput(runId: string, workspacePath: string
   const rec = await waitForRunDone(runId, LONG_RUN_TIMEOUT_MS)
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
-  const parsed = JSON.parse(stripCodeFences(rec.finalResponse)) as { planMarkdown: string; qnaRound: QnaRoundV1 }
+  const parsedRes = parseLenientJson(rec.finalResponse)
+  if (!parsedRes) throw new Error('Failed to parse structured output.')
+  const parsed = parsedRes.value as { planMarkdown: string; qnaRound: QnaRoundV1 }
   const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n'))
   const qnaRound = parsed.qnaRound
 
@@ -1155,7 +1173,9 @@ async function generateTests() {
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Test generation failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
 
-  const parsed = JSON.parse(rec.finalResponse) as { tests: any[] }
+  const parsedRes = parseLenientJson(rec.finalResponse)
+  if (!parsedRes) throw new Error('Failed to parse structured output.')
+  const parsed = parsedRes.value as { tests: any[] }
   const plan = createEmptyTestPlan(selectedSlug.value)
   plan.generatedAt = new Date().toISOString()
   plan.tests = (parsed.tests ?? []).map((t, idx) => ({

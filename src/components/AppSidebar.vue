@@ -62,13 +62,13 @@ watch(
 
 const houseStyleSnippet = computed(() => {
   const lines = String(houseStyle.value ?? '')
-    .replace(/\\r\\n/g, '\\n')
-    .replace(/\\r/g, '\\n')
-    .split('\\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
     .map((l) => l.trimEnd())
     .filter((l) => l.trim().length)
   if (!lines.length) return ''
-  const slice = lines.slice(0, 4).join('\\n')
+  const slice = lines.slice(0, 4).join('\n')
   return slice.length > 320 ? `${slice.slice(0, 320)}…` : slice
 })
 

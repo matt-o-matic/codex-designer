@@ -1,3 +1,5 @@
+import { parseLenientJson } from './json'
+
 export type QnaStateVersion = 1
 
 export type QnaOptionV1 = {
@@ -41,13 +43,8 @@ export function createEmptyQnaStateV1(featureSlug: string): QnaStateV1 {
 }
 
 export function parseQnaStateJson(raw: string): QnaStateV1 | null {
-  let parsed: any
-  try {
-    parsed = JSON.parse(String(raw ?? ''))
-  } catch {
-    return null
-  }
-  if (!parsed || parsed.version !== 1) return null
+  const parsed = parseLenientJson(raw)?.value as any
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.version !== 1) return null
   if (typeof parsed.featureSlug !== 'string' || !parsed.featureSlug.trim().length) return null
   if (typeof parsed.updatedAt !== 'string') return null
   if (!Array.isArray(parsed.rounds)) return null

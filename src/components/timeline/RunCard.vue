@@ -3,6 +3,14 @@ import { computed } from 'vue'
 import MarkdownViewer from '../MarkdownViewer.vue'
 import RunEventStream from '../RunEventStream.vue'
 import AttachmentPreviews from '../AttachmentPreviews.vue'
+import { parseLenientJson } from '../../lib/json'
+import {
+  createEmptyQnaStateV1,
+  normalizeQnaStateV1,
+  parseQnaStateJson,
+  renderQnaMarkdownFromState,
+  type QnaRoundV1,
+} from '../../lib/qnaState'
 
 type RunStatus = 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -76,10 +84,86 @@ const durationLabel = computed(() => {
 const startedLabel = computed(() => formatTimestamp(props.startedAt))
 const assistantLabel = computed(() => formatTimestamp(props.endedAt ?? props.startedAt))
 
+function ensureTrailingNewline(text: string): string {
+  return text.endsWith('\n') ? text : `${text}\n`
+}
+
+function joinMarkdownSections(sections: string[]): string {
+  const normalized = sections
+    .map((s) => String(s ?? '').trimEnd())
+    .filter((s) => s.length > 0)
+  if (!normalized.length) return ''
+  return ensureTrailingNewline(normalized.join('\n\n---\n\n'))
+}
+
+function extractSlugFromPlanMarkdown(planMarkdown: string): string | null {
+  const firstNonEmptyLine =
+    String(planMarkdown ?? '')
+      .split(/\r?\n/)
+      .find((l) => l.trim().length) ?? ''
+
+  const m = firstNonEmptyLine.match(/^#\s+(.+?)\s+(?:—|-)\s+Plan\s*$/)
+  const slug = String(m?.[1] ?? '').trim()
+  return slug.length ? slug : null
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value ?? '')
+  }
+}
+
+function tryRenderStructuredOutput(text: string): string | null {
+  try {
+    const trimmed = String(text ?? '').trim()
+    if (!trimmed.length) return null
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.startsWith('```')) return null
+
+    const parsed = parseLenientJson(text)?.value
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const obj = parsed as Record<string, unknown>
+
+    const planMarkdown = typeof obj.planMarkdown === 'string' ? obj.planMarkdown : null
+    const sections: string[] = []
+    if (planMarkdown) sections.push(planMarkdown)
+
+    if (obj.qna && planMarkdown) {
+      const qnaState = parseQnaStateJson(safeStringify(obj.qna))
+      if (qnaState) {
+        const { state } = normalizeQnaStateV1(qnaState)
+        sections.push(renderQnaMarkdownFromState(state))
+        return joinMarkdownSections(sections)
+      }
+    }
+
+    if (obj.qnaRound && planMarkdown) {
+      const slug = extractSlugFromPlanMarkdown(planMarkdown) ?? 'feature'
+      const qnaRound = obj.qnaRound as QnaRoundV1
+      const state = createEmptyQnaStateV1(slug)
+      state.rounds = [qnaRound]
+      const { state: normalized } = normalizeQnaStateV1(state)
+      sections.push(renderQnaMarkdownFromState(normalized))
+      return joinMarkdownSections(sections)
+    }
+
+    if (planMarkdown) return ensureTrailingNewline(planMarkdown)
+    return null
+  } catch {
+    return null
+  }
+}
+
 function toMarkdown(text: string): string {
   const raw = String(text ?? '')
   const trimmed = raw.trim()
   if (!trimmed) return ''
+
+  const structured = tryRenderStructuredOutput(raw)
+  if (structured) return structured
+
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     return `\`\`\`json\n${trimmed}\n\`\`\`\n`
   }

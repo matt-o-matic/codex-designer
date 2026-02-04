@@ -4,6 +4,7 @@ import { useAppState } from '../lib/appState'
 import { useNewFeatureUi } from '../lib/newFeatureUi'
 import { useRunStore } from '../lib/runStore'
 import { useWorkbenchUi } from '../lib/workbenchUi'
+import { parseLenientJson } from '../lib/json'
 import { buildPlanningCreatePrompt } from '../lib/prompts'
 import { normalizeQnaStateV1, renderQnaMarkdownFromState, type QnaStateV1 } from '../lib/qnaState'
 
@@ -21,34 +22,78 @@ const submitError = ref<string | null>(null)
 const submitRunId = ref<string | null>(null)
 const submitRun = computed(() => getRun(submitRunId.value))
 
+const QNA_OPTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    key: { type: 'string' },
+    text: { type: 'string' },
+    recommended: { type: 'boolean' },
+  },
+  required: ['key', 'text', 'recommended'],
+  additionalProperties: false,
+} as const
+
+const QNA_ANSWER_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    createdAt: { type: 'string' },
+    selectedKey: { type: 'string' },
+    notes: { type: 'string' },
+    attachments: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['id', 'createdAt', 'selectedKey', 'notes', 'attachments'],
+  additionalProperties: false,
+} as const
+
+const QNA_QUESTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    prompt: { type: 'string' },
+    options: { type: 'array', items: QNA_OPTION_SCHEMA },
+    recommendedKey: { type: 'string' },
+    answers: { type: 'array', items: QNA_ANSWER_SCHEMA },
+  },
+  required: ['id', 'prompt', 'options', 'recommendedKey', 'answers'],
+  additionalProperties: false,
+} as const
+
+const QNA_ROUND_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    title: { type: 'string' },
+    questions: { type: 'array', items: QNA_QUESTION_SCHEMA },
+  },
+  required: ['id', 'title', 'questions'],
+  additionalProperties: false,
+} as const
+
+const QNA_STATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    version: { type: 'integer' },
+    featureSlug: { type: 'string' },
+    updatedAt: { type: 'string' },
+    rounds: { type: 'array', items: QNA_ROUND_SCHEMA },
+  },
+  required: ['version', 'featureSlug', 'updatedAt', 'rounds'],
+  additionalProperties: false,
+} as const
+
 const PLAN_CREATE_SCHEMA = {
   type: 'object',
   properties: {
     planMarkdown: { type: 'string' },
-    qna: {
-      type: 'object',
-      properties: {
-        version: { type: 'integer' },
-        featureSlug: { type: 'string' },
-        updatedAt: { type: 'string' },
-        rounds: { type: 'array' },
-      },
-      required: ['version', 'featureSlug', 'updatedAt', 'rounds'],
-      additionalProperties: true,
-    },
+    qna: QNA_STATE_SCHEMA,
   },
   required: ['planMarkdown', 'qna'],
   additionalProperties: false,
 } as const
 
-function stripCodeFences(text: string): string {
-  const trimmed = (text ?? '').trim()
-  const m = trimmed.match(/^```[a-zA-Z0-9_-]*\\s*\\n([\\s\\S]*)\\n```$/)
-  return m ? m[1] : text
-}
-
 function ensureTrailingNewline(text: string): string {
-  return text.endsWith('\\n') ? text : `${text}\\n`
+  return text.endsWith('\n') ? text : `${text}\n`
 }
 
 function sleep(ms: number): Promise<void> {
@@ -119,7 +164,7 @@ async function createFeature() {
       input: prompt,
       outputSchema: PLAN_CREATE_SCHEMA,
       uiAction: 'planning-create',
-      uiUserMessage: `Create feature: ${nextSlug}${brief.value.trim().length ? `\\n\\n${brief.value.trim()}` : ''}`,
+      uiUserMessage: `Create feature: ${nextSlug}${brief.value.trim().length ? `\n\n${brief.value.trim()}` : ''}`,
     })
 
     submitRunId.value = runId
@@ -127,12 +172,14 @@ async function createFeature() {
     if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
     if (!rec.finalResponse) throw new Error('No structured output received.')
 
-    const parsed = JSON.parse(stripCodeFences(rec.finalResponse)) as { planMarkdown: string; qna: QnaStateV1 }
+    const parsedRes = parseLenientJson(rec.finalResponse)
+    if (!parsedRes) throw new Error('Failed to parse structured output.')
+    const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
     const qnaState = normalizeQnaStateV1(parsed.qna).state
-    const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\\r\\n/g, '\\n'))
+    const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
     const qnaMd = renderQnaMarkdownFromState(qnaState)
 
-    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\\n')
+    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\n')
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, qnaMd)
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.plan.md`, plan)
 

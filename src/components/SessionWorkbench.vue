@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { parseLenientJson } from '../lib/json'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
 import {
   buildImplementationFollowupPrompt,
@@ -191,12 +192,6 @@ function ensureTrailingNewline(text: string): string {
   return text.endsWith('\n') ? text : `${text}\n`
 }
 
-function stripCodeFences(text: string): string {
-  const trimmed = (text ?? '').trim()
-  const m = trimmed.match(/^```[a-zA-Z0-9_-]*\s*\n([\s\S]*)\n```$/)
-  return m ? m[1] : text
-}
-
 function extractWorkspaceImagePaths(markdown: string): string[] {
   const raw = String(markdown ?? '')
   const matches = raw.match(/docs\/assets\/[^\s)\]]+/g) ?? []
@@ -246,15 +241,18 @@ async function loadArtifacts() {
   let loadedQna: QnaStateV1 | null = null
   try {
     const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`)
+    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+    const parsedRes = parseLenientJson(raw)
+    const needsRewrite = !!parsedRes && parsedRes.jsonText !== rawTrimmed
     const parsed = parseQnaStateJson(raw)
     if (!parsed) throw new Error('Invalid Q&A JSON (expected version: 1).')
     const norm = normalizeQnaStateV1(parsed)
     loadedQna = norm.state
-    if (norm.changed) {
+    if (norm.changed || needsRewrite) {
       await window.codexDesigner!.writeTextFile(
         props.workspacePath,
         `docs/${props.featureSlug}.qna.json`,
-        JSON.stringify(loadedQna, null, 2) + '\\n'
+        JSON.stringify(loadedQna, null, 2) + '\n'
       )
     }
   } catch (e) {
@@ -276,14 +274,28 @@ async function loadArtifacts() {
   qnaState.value = loadedQna
   qnaPlanNotes.value = String(loadedQna?.notes ?? '')
 
+  let testNeedsRewrite = false
   try {
     const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.test.json`)
-    testPlan.value = JSON.parse(raw) as TestPlan
+    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+    const parsed = parseLenientJson(raw)
+    if (!parsed) throw new Error('Invalid test plan JSON.')
+    testNeedsRewrite = parsed.jsonText !== rawTrimmed
+    testPlan.value = parsed.value as TestPlan
   } catch {
     testPlan.value = createEmptyTestPlan(props.featureSlug)
     testLoadError.value = null
   }
-  if (testPlan.value) ensureRound(testPlan.value)
+  if (testPlan.value) {
+    ensureRound(testPlan.value)
+    if (testNeedsRewrite) {
+      await window.codexDesigner!.writeTextFile(
+        props.workspacePath,
+        `docs/${props.featureSlug}.test.json`,
+        JSON.stringify(testPlan.value, null, 2) + '\n'
+      )
+    }
+  }
 
   try {
     const rawState = await window.codexDesigner!.readTextFile(props.workspacePath, `.codex-designer/cache/state.json`)
@@ -393,15 +405,15 @@ function toggleQuestionEdit(q: QnaQuestionV1) {
 async function saveQnaPlanNotes() {
   if (!qnaState.value) return
   if (qnaLocked.value) return
-  const nextNotes = String(qnaPlanNotes.value ?? '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trimEnd()
-  const curNotes = String(qnaState.value.notes ?? '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trimEnd()
+  const nextNotes = String(qnaPlanNotes.value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
+  const curNotes = String(qnaState.value.notes ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
   if (nextNotes === curNotes) return
 
   const nextState: QnaStateV1 = structuredClone(qnaState.value)
   nextState.notes = nextNotes
   nextState.updatedAt = new Date().toISOString()
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\\n')
+  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
   const md = renderQnaMarkdownFromState(nextState)
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, md)
   qnaState.value = nextState
@@ -413,7 +425,7 @@ async function saveQnaAnswer(q: QnaQuestionV1) {
   if (qnaLocked.value) return
 
   const selectedKey = inferredSelectedKey(q)
-  const notes = String(inferredNotes(q) ?? '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trimEnd()
+  const notes = String(inferredNotes(q) ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
   const attachments = extractWorkspaceImagePaths(notes)
   const now = new Date().toISOString()
 
@@ -434,7 +446,7 @@ async function saveQnaAnswer(q: QnaQuestionV1) {
     }
   }
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\\n')
+  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
   const md = renderQnaMarkdownFromState(nextState)
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, md)
   qnaState.value = nextState
@@ -462,7 +474,7 @@ async function setTestStatus(round: TestRound, testId: string, status: string) {
 
 async function saveTestPlan() {
   if (!testPlan.value) return
-  const json = JSON.stringify(testPlan.value, null, 2) + '\\n'
+  const json = JSON.stringify(testPlan.value, null, 2) + '\n'
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.test.json`, json)
   const md = renderTestMarkdown(testPlan.value)
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.test.md`, md)
@@ -564,8 +576,10 @@ async function applyPlanningNextRoundOutput(runId: string) {
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
 
-  const parsed = JSON.parse(stripCodeFences(rec.finalResponse)) as { planMarkdown: string; qnaRound: QnaRoundV1 }
-  const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\\r\\n/g, '\\n'))
+  const parsedRes = parseLenientJson(rec.finalResponse)
+  if (!parsedRes) throw new Error('Failed to parse structured output.')
+  const parsed = parsedRes.value as { planMarkdown: string; qnaRound: QnaRoundV1 }
+  const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
   const qnaRound = parsed.qnaRound
 
   const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`)
@@ -581,7 +595,7 @@ async function applyPlanningNextRoundOutput(runId: string) {
   const normalized = normalizeQnaStateV1(nextState).state
   const qnaMd = renderQnaMarkdownFromState(normalized)
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(normalized, null, 2) + '\\n')
+  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(normalized, null, 2) + '\n')
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, qnaMd)
   await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.plan.md`, plan)
 
@@ -681,7 +695,9 @@ async function generateTests() {
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Test generation failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
 
-  const parsed = JSON.parse(rec.finalResponse) as { tests: any[] }
+  const parsedRes = parseLenientJson(rec.finalResponse)
+  if (!parsedRes) throw new Error('Failed to parse structured output.')
+  const parsed = parsedRes.value as { tests: any[] }
   const plan = createEmptyTestPlan(props.featureSlug)
   plan.generatedAt = new Date().toISOString()
   plan.tests = (parsed.tests ?? []).map((t, idx) => ({
@@ -701,7 +717,7 @@ async function generateTests() {
 async function runImplementation() {
   if (isRoleBusy('implementation')) return
   await loadHouseStyle()
-  const images = extractWorkspaceImagePaths(`${planMarkdown.value}\\n\\n${qnaMarkdown.value}`)
+  const images = extractWorkspaceImagePaths(`${planMarkdown.value}\n\n${qnaMarkdown.value}`)
   const prompt = buildImplementationPrompt({ featureSlug: props.featureSlug, houseStyleMarkdown: houseStyleMarkdown.value })
 
   const runId = await startRun({
@@ -928,7 +944,7 @@ async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string)
 async function onPasteComposer(e: ClipboardEvent) {
   await attachPastedImage(e, (rel) => {
     const md = `![pasted image](${rel})`
-    composerText.value = composerText.value.trim().length ? `${composerText.value}\\n\\n${md}` : md
+    composerText.value = composerText.value.trim().length ? `${composerText.value}\n\n${md}` : md
   })
 }
 
@@ -938,7 +954,7 @@ async function onPasteQnaNotes(e: ClipboardEvent, q: QnaQuestionV1) {
     const md = `![pasted image](${rel})`
     qnaEditOpen.value = { ...qnaEditOpen.value, [q.id]: true }
     const existing = String(draftNotes.value[q.id] ?? '')
-    draftNotes.value = { ...draftNotes.value, [q.id]: existing.trim().length ? `${existing}\\n\\n${md}` : md }
+    draftNotes.value = { ...draftNotes.value, [q.id]: existing.trim().length ? `${existing}\n\n${md}` : md }
   })
 }
 
