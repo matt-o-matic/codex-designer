@@ -3,9 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import './style.css'
 
-import WorkspacePage from './pages/WorkspacePage.vue'
-import SessionPage from './pages/SessionPage.vue'
-import SettingsPage from './pages/SettingsPage.vue'
+import WorkbenchPage from './pages/WorkbenchPage.vue'
 
 const storedTheme = localStorage.getItem('codex-designer:theme')
 if (storedTheme === 'dark') {
@@ -19,11 +17,11 @@ if (storedTheme === 'dark') {
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: '/', redirect: '/workspace' },
-    { path: '/workspace', component: WorkspacePage },
-    { path: '/session', component: SessionPage },
-    { path: '/session/:slug', component: SessionPage },
-    { path: '/settings', component: SettingsPage },
+    { path: '/', component: WorkbenchPage },
+    { path: '/workspace', redirect: '/' },
+    { path: '/session', redirect: '/' },
+    { path: '/session/:slug', redirect: '/' },
+    { path: '/settings', redirect: '/' },
   ],
 })
 

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
 
+defineOptions({ inheritAttrs: false })
+
 const props = withDefaults(
   defineProps<{
   workspacePath: string
@@ -81,7 +83,7 @@ function shortName(rel: string): string {
 </script>
 
 <template>
-  <div class="flex flex-wrap gap-2">
+  <div v-bind="$attrs" class="flex flex-wrap gap-2">
     <div
       v-for="rel in items"
       :key="rel"

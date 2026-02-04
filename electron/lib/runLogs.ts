@@ -15,6 +15,10 @@ export type RunLogMeta = {
   role: ThreadRole
   profileId: 'careful' | 'yolo'
   model?: string
+  uiAction?: string
+  uiUserMessage?: string
+  input?: string
+  inputImages?: string[]
   startedAt: string
   endedAt?: string
   status: RunLogStatus
@@ -57,12 +61,48 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function isPidAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    const code = (e as any)?.code
+    return code === 'EPERM'
+  }
+}
+
+function summarizeInput(input: StartRunArgs['input']): { text: string; images: string[] } {
+  if (typeof input === 'string') return { text: input, images: [] }
+  if (!Array.isArray(input)) return { text: '', images: [] }
+
+  let text = ''
+  const images: string[] = []
+
+  for (const part of input) {
+    if (!part || typeof part !== 'object') continue
+    const t = (part as any).type
+    if (t === 'text' && typeof (part as any).text === 'string') {
+      text += String((part as any).text)
+    } else if (t === 'local_image' && typeof (part as any).path === 'string') {
+      images.push(String((part as any).path))
+    }
+  }
+
+  return { text, images }
+}
+
 export class RunLogStore {
   private readonly writers = new Map<string, RunLogWriter>()
 
   async startRun(runId: string, args: StartRunArgs, opts?: { captureEvents?: boolean }): Promise<void> {
     if (this.writers.has(runId)) return
     await ensureDir(runsDir())
+
+    const { text: inputText, images: inputImages } = summarizeInput(args.input)
+    const uiAction = typeof args.uiAction === 'string' && args.uiAction.trim().length ? args.uiAction.trim() : undefined
+    const uiUserMessage =
+      typeof args.uiUserMessage === 'string' && args.uiUserMessage.trim().length ? args.uiUserMessage.trim() : undefined
 
     const meta: RunLogMeta = {
       version: 1,
@@ -72,6 +112,10 @@ export class RunLogStore {
       role: args.role,
       profileId: args.profileId,
       model: args.model,
+      uiAction,
+      uiUserMessage: uiUserMessage ? (uiUserMessage.length > 20000 ? uiUserMessage.slice(0, 20000) : uiUserMessage) : undefined,
+      input: inputText ? (inputText.length > 20000 ? inputText.slice(0, 20000) : inputText) : undefined,
+      inputImages: inputImages.length ? inputImages : undefined,
       startedAt: nowIso(),
       status: 'running',
     }
@@ -121,6 +165,22 @@ export class RunLogStore {
       if (!meta || meta.version !== 1) continue
       if (filter?.workspacePath && meta.workspacePath !== filter.workspacePath) continue
       if (filter?.featureSlug && meta.featureSlug !== filter.featureSlug) continue
+
+      if (
+        meta.status === 'running' &&
+        typeof meta.pid === 'number' &&
+        Number.isFinite(meta.pid) &&
+        !isPidAlive(meta.pid)
+      ) {
+        meta.status = 'failed'
+        meta.endedAt = nowIso()
+        meta.error = meta.error ?? `Codex process exited unexpectedly (pid ${meta.pid}).`
+        await writeJsonFileAtomic(metaPath(runId), meta).catch(() => {})
+        await fs
+          .appendFile(eventsPath(runId), `${safeJsonLine({ type: 'run.failed', runId: meta.runId, message: meta.error })}\n`)
+          .catch(() => {})
+      }
+
       metas.push(meta)
     }
     metas.sort((a, b) => b.startedAt.localeCompare(a.startedAt))

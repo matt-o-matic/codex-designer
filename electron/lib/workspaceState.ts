@@ -25,6 +25,7 @@ export type WorkspaceState = {
     {
       planningThreadId?: string
       implementationThreadId?: string
+      testingThreadId?: string
       lastPlanRegeneratedAt?: string
       lastQnaUpdatedAt?: string
     }

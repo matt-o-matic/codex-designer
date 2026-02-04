@@ -3,16 +3,23 @@ function renderAttachments(relPaths: string[]): string {
   return `\n\n## Attachments\n\n${relPaths.map((p) => `- ${p}`).join('\n')}\n`
 }
 
+function appendHouseStyle(prompt: string, houseStyleMarkdown?: string): string {
+  const style = String(houseStyleMarkdown ?? '').trim()
+  if (!style.length) return prompt
+  return `${prompt}\n\n## House Style (workspace)\n${style}\n`
+}
+
 export function buildPlanningCreatePrompt(args: {
   featureSlug: string
   brief: string
   attachments?: string[]
+  houseStyleMarkdown?: string
 }): string {
   const slug = args.featureSlug
   const brief = args.brief?.trim() || ''
   const attachments = Array.isArray(args.attachments) ? args.attachments.filter(Boolean) : []
 
-  return `You are codex-designer. Create a deterministic planning output for a new feature.
+  const base = `You are codex-designer. Create a deterministic planning output for a new feature.
 
 Return ONLY valid JSON matching the provided output schema (no markdown fences, no extra keys, no commentary).
 
@@ -55,12 +62,15 @@ You must produce:
   - \`answers\`: empty array (no answers yet)
 - Exactly one option must have \`recommended: true\` (the recommended one).
 `
+
+  return appendHouseStyle(base, args.houseStyleMarkdown)
 }
 
 export function buildPlanningNextRoundPrompt(args: {
   featureSlug: string
   nextRoundNumber: number
   additionalNotes?: string
+  houseStyleMarkdown?: string
 }): string {
   const slug = args.featureSlug
   const nextRound = Math.max(1, Math.floor(args.nextRoundNumber || 1))
@@ -92,7 +102,7 @@ ${additionalNotes}
 `
     : ''
 
-  return `You are codex-designer. The user has answered the current Q&A.
+  const base = `You are codex-designer. The user has answered the current Q&A.
 
 Return ONLY valid JSON matching the provided output schema (no markdown fences, no extra keys, no commentary).
 
@@ -128,11 +138,13 @@ ${lateStageGuidance}
   - \`answers\`: empty array
 - Exactly one option must have \`recommended: true\` (the recommended one).
 `
+
+  return appendHouseStyle(base, args.houseStyleMarkdown)
 }
 
-export function buildImplementationPrompt(args: { featureSlug: string }): string {
+export function buildImplementationPrompt(args: { featureSlug: string; houseStyleMarkdown?: string }): string {
   const slug = args.featureSlug
-  return `You are codex-designer in IMPLEMENTATION mode.
+  const base = `You are codex-designer in IMPLEMENTATION mode.
 
 ## Source of truth (read-only)
 - \`docs/${slug}.plan.md\`
@@ -173,22 +185,27 @@ Do NOT modify the plan or Q&A docs. Implement the feature in the workspace accor
 - The plan’s “Validation” checklist is satisfied.
 - The repo’s relevant automated checks pass (tests/typecheck/build).
 `
+
+  return appendHouseStyle(base, args.houseStyleMarkdown)
 }
 
 export function buildImplementationFollowupPrompt(args: {
   featureSlug: string
   message: string
   attachments?: string[]
+  houseStyleMarkdown?: string
 }): string {
   const slug = args.featureSlug
   const message = args.message?.trim() || ''
   const attachments = Array.isArray(args.attachments) ? args.attachments.filter(Boolean) : []
 
-  return `Continue the existing Codex implementation thread for \`${slug}\`.
+  const base = `Continue the existing Codex implementation thread for \`${slug}\`.
 
 The user is providing follow-up context (logs, build/test errors, screenshots) to address before continuing.
 
 ## Follow-up
 ${message || '(no message provided)'}${renderAttachments(attachments)}
 `
+
+  return appendHouseStyle(base, args.houseStyleMarkdown)
 }

@@ -1,0 +1,694 @@
+{
+  "version": 1,
+  "featureSlug": "usability-enhancements",
+  "updatedAt": "2026-02-04T05:54:20.368Z",
+  "rounds": [
+    {
+      "id": "round-1",
+      "title": "Round 1",
+      "questions": [
+        {
+          "id": "r1-q1",
+          "prompt": "What should be the primary navigation model after combining `Workspace`, `Sessions`, and `Settings`?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Single unified workbench (sidebar tree + main panel context)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Keep separate routes but hide them behind one combined sidebar entry",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Top-level tabs inside one page (Workspace/Sessions/Settings)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Minimal change: keep current nav items, just add cross-links",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q2",
+          "prompt": "In v1, which settings should be treated as workspace-scoped vs app-global?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Everything shown as workspace-scoped; no dedicated global settings page",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Split: tiny app-global prefs + workspace-scoped operational settings",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Keep current Settings page as-is (global) but reachable from workbench",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Defer: keep existing split until later",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q3",
+          "prompt": "For the sidebar workspace list, how should multiple workspaces behave?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Show recent workspaces; any can expand to show sessions (lazy-load on expand)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Show only the active workspace; workspace switching via dropdown/picker",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Accordion: list recent workspaces but only one expanded at a time",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Only show workspaces inside a modal picker (not persistent)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "I think everything starts off as expanded. And switching between them would be a lot like switching between chats in the chatGPT interface.",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q4",
+          "prompt": "What should the `Apply to all modes` control do for run defaults?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Apply model + thinking level from current mode to all roles",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Apply model only (leave thinking level unchanged)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Apply only to the three main modes (planning/implementation/new work)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Provide two actions: `Apply model` and `Apply model + thinking`",
+              "recommended": true
+            },
+            {
+              "key": "E",
+              "text": "Do nothing in UI; rely on users editing a JSON file",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "D",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "D",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q5",
+          "prompt": "Which Git capabilities are required in the first usable iteration?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Panel with fetch/pull/push + branch switch/create + merge; show stdout/stderr; no conflict UI",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Only fetch/pull/push and current-branch status (no branch ops)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Full git client UI (staging, per-file actions, conflict resolution)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Freeform command box to run arbitrary git commands",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q6",
+          "prompt": "What default safety behavior should `Pull` use?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Default to `pull --ff-only` to avoid implicit merge commits",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Use plain `git pull` (whatever user config does)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Always `pull --rebase`",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Always prompt the user to choose the pull strategy each time",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "B",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q7",
+          "prompt": "How should `Open in VS Code` work cross-platform?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Try `code` CLI first; fallback to OS open; show clear error if neither works",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Require `code` CLI; show setup instructions otherwise",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Never use `code`; always OS open only",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "User-configurable command path in settings",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q8",
+          "prompt": "When a session is selected, what should happen to the layout?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Session becomes main panel content; sidebar stays; workspace edit uses a flyout side sheet",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Keep the current session flyout overlay; just move the session list into sidebar",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Open sessions in a new window",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Session replaces the entire window (no sidebar while viewing a session)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q9",
+          "prompt": "How should the run feed present the final response?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Always render final response as full markdown; keep event details collapsible",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Show final response only; hide the underlying event stream entirely",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Keep current event stream UI but auto-expand final response details",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Render final response only as plain text (no markdown formatting)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r1-q10",
+          "prompt": "How should session activity indicators classify the type of work in progress?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Spinner + icon derived from run role and UI action (Q&A/implement/testing/scripts/follow-up/generic)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Spinner only (no type icon)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Only indicate potentially code-modifying work (implementation/testing)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Show a numeric progress indicator (based on event count) instead of type",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:33:37.685Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-2",
+      "title": "Round 2",
+      "questions": [
+        {
+          "id": "r2-q1",
+          "prompt": "Should the per-workspace `House Style` markdown be display-only, or also injected into Codex prompts?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Display-only (UI reference only)",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Inject into planning prompts only",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Inject into planning + implementation prompts",
+              "recommended": true
+            },
+            {
+              "key": "D",
+              "text": "Inject into all runs (planning/implementation/testing/generic)",
+              "recommended": false
+            },
+            {
+              "key": "E",
+              "text": "User-toggle per run (checkbox)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "C",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:52:29.047Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q2",
+          "prompt": "The new bottom composer should append to the current session. What should it target by default?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Always the planning thread (Q&A)",
+              "recommended": false
+            },
+            {
+              "key": "B",
+              "text": "Always the implementation thread",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Default to the current tab (planning vs implementation), with a dropdown to override",
+              "recommended": true
+            },
+            {
+              "key": "D",
+              "text": "Always start a new generic run (no thread continuation)",
+              "recommended": false
+            },
+            {
+              "key": "E",
+              "text": "Keep per-tab inputs only (no bottom composer)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "C",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:52:29.047Z",
+              "selectedKey": "C",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r2-q3",
+          "prompt": "When you expand a non-active workspace in the sidebar, should that also activate/switch to it?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Yes — expanding also activates it (chat-like switching)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "No — expanding is passive; activating requires a separate click/action",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Allow expanding multiple workspaces without switching the active one (peek sessions)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Only one workspace at a time; switch via picker (no sidebar list)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-03T23:52:29.047Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-3",
+      "title": "Round 3",
+      "questions": [
+        {
+          "id": "r3-q1",
+          "prompt": "For the new chat-like experience, should the session have one unified timeline across all modes, or separate timelines per mode?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Separate timelines per mode (Planning / Implementation / Testing)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "One unified timeline, with a mode filter (chips/tabs)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "One unified timeline always showing everything (no filter)",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Keep current mode tabs, but only make planning/testing chat-like",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-04T00:09:11.787Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q2",
+          "prompt": "You requested that Q&A/testing rounds and their actions live as controls in the history. How literal should that be?",
+          "options": [
+            {
+              "key": "A",
+              "text": "All primary actions are inline control cards in the history (chat-like)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Actions stay in a bottom toolbar near the composer (history is read-only)",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Both: inline control cards + a small bottom toolbar for quick access",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Keep actions where they are today; only move the composer/config",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-04T00:09:11.787Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q3",
+          "prompt": "How should Q&A rounds appear in the planning history?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Round cards show questions + chosen answers; expand to edit in place",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Round cards are summary-only; editing opens a modal",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Only the latest round is editable; prior rounds are read-only",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Keep the current Q&A editor unchanged; add a separate history view",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-04T00:09:11.787Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q4",
+          "prompt": "What should the bottom “configuration around everything” look like in the session view?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Always-visible compact config row above the composer (profile/model/thinking/etc)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Config hidden behind a settings button that expands inline",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Config stays at the top; only the composer moves to the bottom",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "Config is per-action card only (each history control has its own config)",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-04T00:09:11.787Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        },
+        {
+          "id": "r3-q5",
+          "prompt": "Should plan/test documents be rendered inline as part of the chat-like history (collapsible), or kept as separate dedicated views?",
+          "options": [
+            {
+              "key": "A",
+              "text": "Render inline as collapsible history cards (with an “open file” affordance)",
+              "recommended": true
+            },
+            {
+              "key": "B",
+              "text": "Keep as separate views/tabs; history only shows rounds/runs",
+              "recommended": false
+            },
+            {
+              "key": "C",
+              "text": "Inline preview only (first ~N lines), full doc always opened separately",
+              "recommended": false
+            },
+            {
+              "key": "D",
+              "text": "No inline rendering; only show links to open the files",
+              "recommended": false
+            }
+          ],
+          "recommendedKey": "A",
+          "answers": [
+            {
+              "id": "rev-1",
+              "createdAt": "2026-02-04T00:09:11.787Z",
+              "selectedKey": "A",
+              "notes": "",
+              "attachments": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "round-4",
+      "title": "Round 4 (complete)",
+      "questions": []
+    }
+  ],
+  "notes": "- Sidebar activity: spinner only (remove work-type icon).\n- Sidebar workspace settings: no settings icon in the sidebar; use the workspace header settings action.\n- Sidebar layout: place “New workspace” control above/below search as its own row (not squeezed inline).\n- Main panel: no “Workbench” card; show a simple empty state when no session is selected.\n"
+}

@@ -7,6 +7,7 @@ const props = defineProps<{
   disabled?: boolean
   minRows?: number
   maxRows?: number
+  maxViewportFraction?: number
   class?: string
 }>()
 
@@ -20,6 +21,11 @@ const el = ref<HTMLTextAreaElement | null>(null)
 
 const minRows = computed(() => Math.max(1, Math.floor(props.minRows ?? 1)))
 const maxRows = computed(() => (props.maxRows ? Math.max(minRows.value, Math.floor(props.maxRows)) : null))
+const maxViewportFraction = computed(() => {
+  const raw = Number(props.maxViewportFraction ?? 0.5)
+  if (!Number.isFinite(raw)) return 0.5
+  return Math.min(1, Math.max(0.1, raw))
+})
 
 function syncHeight() {
   const t = el.value
@@ -32,7 +38,7 @@ function syncHeight() {
 
   const minH = minRows.value * lineHeight + paddingTop + paddingBottom
   const maxByRows = maxRows.value ? maxRows.value * lineHeight + paddingTop + paddingBottom : Infinity
-  const maxByViewport = typeof window !== 'undefined' ? window.innerHeight * 0.5 : Infinity
+  const maxByViewport = typeof window !== 'undefined' ? window.innerHeight * maxViewportFraction.value : Infinity
   const maxH = Math.min(maxByRows, maxByViewport)
   const next = Math.min(Math.max(t.scrollHeight, minH), maxH)
   t.style.height = `${Math.ceil(next)}px`

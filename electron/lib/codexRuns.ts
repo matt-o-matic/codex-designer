@@ -49,6 +49,8 @@ export type StartRunArgs = {
   input: Input
   outputSchema?: unknown
   oneShotNetwork?: boolean
+  uiAction?: string
+  uiUserMessage?: string
 }
 
 export type RunStarted = {
@@ -240,6 +242,7 @@ export class CodexRunManager {
 
     await this.followCodexEventsFile({
       runId,
+      pid,
       workspacePath: args.workspacePath,
       eventsFile,
       persistThreadId,
@@ -262,7 +265,7 @@ export class CodexRunManager {
     featureSlug: string | undefined,
     role: ThreadRole,
   ): Promise<{ resumeThreadId: string | null; persistThreadId: (threadId: string) => Promise<void> }> {
-    if (!featureSlug || role === 'generic' || role === 'testing') {
+    if (!featureSlug || role === 'generic') {
       return { resumeThreadId: null, persistThreadId: async () => {} }
     }
 
@@ -274,6 +277,8 @@ export class CodexRunManager {
         ? featureState.planningThreadId
         : role === 'implementation'
           ? featureState.implementationThreadId
+          : role === 'testing'
+            ? featureState.testingThreadId
           : undefined
 
     const resumeThreadId = await this.validateResumeThreadId(workspacePath, featureSlug, role, currentId)
@@ -284,6 +289,7 @@ export class CodexRunManager {
       const nextFeature = { ...(features[featureSlug] ?? {}) }
       if (role === 'planning') nextFeature.planningThreadId = threadId
       if (role === 'implementation') nextFeature.implementationThreadId = threadId
+      if (role === 'testing') nextFeature.testingThreadId = threadId
       features[featureSlug] = nextFeature
       await writeWorkspaceState(workspacePath, { ...latest, features })
     }
@@ -294,7 +300,7 @@ export class CodexRunManager {
   private async validateResumeThreadId(
     workspacePath: string,
     featureSlug: string,
-    role: Exclude<ThreadRole, 'generic' | 'testing'>,
+    role: Exclude<ThreadRole, 'generic'>,
     candidate: string | undefined
   ): Promise<string | null> {
     if (!candidate || !candidate.trim().length) return null
@@ -311,6 +317,7 @@ export class CodexRunManager {
     const nextFeature = { ...(features[featureSlug] ?? {}) }
     if (role === 'planning') delete nextFeature.planningThreadId
     if (role === 'implementation') delete nextFeature.implementationThreadId
+    if (role === 'testing') delete nextFeature.testingThreadId
     features[featureSlug] = nextFeature
     await writeWorkspaceState(workspacePath, { ...latest, features })
 
@@ -373,6 +380,7 @@ export class CodexRunManager {
 
   private async followCodexEventsFile(args: {
     runId: string
+    pid: number
     workspacePath: string
     eventsFile: string
     persistThreadId: (threadId: string) => Promise<void>
@@ -445,6 +453,23 @@ export class CodexRunManager {
 
       // Once we have a turn end signal, we can stop following shortly after.
       if (emittedResult || emittedFailed) break
+      if (!isPidAlive(args.pid)) {
+        // Best-effort: try parsing a final unterminated line before concluding this is a crash.
+        if (carry.trim().length) {
+          await parseLine(carry)
+          carry = ''
+        }
+
+        if (!emittedResult && !emittedFailed) {
+          emittedFailed = true
+          args.onEvent({
+            type: 'run.failed',
+            runId: args.runId,
+            message: `Codex process exited unexpectedly (pid ${args.pid}).`,
+          })
+        }
+        break
+      }
 
       await sleep(125)
     }
@@ -544,6 +569,17 @@ function buildCodexEnv(): Record<string, string> {
 
 function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    const code = (e as any)?.code
+    return code === 'EPERM'
+  }
 }
 
 async function sameRealPath(a: string, b: string): Promise<boolean> {

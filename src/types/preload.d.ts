@@ -38,6 +38,24 @@ declare global {
           updatedAtMs: number | null
         }[]
       }>
+      getWorkspaceSummary(workspacePath: string): Promise<{
+        path: string
+        isGitRepo: boolean
+        isGitClean: boolean | null
+        headCommit: string | null
+        shareability: 'local' | 'shareable' | null
+        features: {
+          slug: string
+          docsDir: string
+          planPath: string
+          qnaPath: string
+          implPath: string
+          testJsonPath: string
+          testMdPath: string
+          assetsDir: string
+          updatedAtMs: number | null
+        }[]
+      }>
       setWorkspaceShareability(
         workspacePath: string,
         shareability: 'local' | 'shareable'
@@ -108,6 +126,8 @@ declare global {
           | Array<{ type: 'text'; text: string } | { type: 'local_image'; path: string }>
         outputSchema?: unknown
         oneShotNetwork?: boolean
+        uiAction?: string
+        uiUserMessage?: string
       }): Promise<{ runId: string }>
       abortRun(runId: string): Promise<void>
       onRunEvent(callback: (payload: { runId: string; event: unknown }) => void): () => void
@@ -127,6 +147,20 @@ declare global {
         workspacePath: string,
         message: string
       ): Promise<{ commit: string; stdout: string; stderr: string }>
+      gitFetch(workspacePath: string): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      gitPull(workspacePath: string): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      gitPush(workspacePath: string): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      gitListBranches(workspacePath: string): Promise<{ current: string | null; branches: string[] }>
+      gitCheckout(workspacePath: string, branch: string): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      gitCreateBranch(
+        workspacePath: string,
+        branch: string,
+        base?: string
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      gitMerge(workspacePath: string, source: string): Promise<{ stdout: string; stderr: string; exitCode: number }>
+      openInVsCode(
+        workspacePath: string
+      ): Promise<{ ok: boolean; method: 'code' | 'os-open'; error?: string }>
       listRunLogs(filter?: { workspacePath?: string; featureSlug?: string }): Promise<any[]>
       readRunLog(runId: string, limit?: number): Promise<{ meta: any; events: any[] }>
     }

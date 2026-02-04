@@ -50,6 +50,8 @@ type StartRunArgs = {
   input: string | Array<{ type: 'text'; text: string } | { type: 'local_image'; path: string }>
   outputSchema?: unknown
   oneShotNetwork?: boolean
+  uiAction?: string
+  uiUserMessage?: string
 }
 
 type RunEventPayload = {
@@ -63,6 +65,8 @@ type CodexModelInfo = {
   description: string
   isDefault: boolean
 }
+
+type GitCommandResult = { stdout: string; stderr: string; exitCode: number }
 
 const api = {
   setWindowTitle(title: string): Promise<boolean> {
@@ -85,6 +89,9 @@ const api = {
   },
   openWorkspace(workspacePath: string): Promise<WorkspaceSummary> {
     return ipcRenderer.invoke('codex-designer:open-workspace', workspacePath)
+  },
+  getWorkspaceSummary(workspacePath: string): Promise<WorkspaceSummary> {
+    return ipcRenderer.invoke('codex-designer:get-workspace-summary', workspacePath)
   },
   setWorkspaceShareability(workspacePath: string, shareability: 'local' | 'shareable'): Promise<WorkspaceSummary> {
     return ipcRenderer.invoke('codex-designer:set-workspace-shareability', workspacePath, shareability)
@@ -140,6 +147,30 @@ const api = {
   },
   gitCommitAll(workspacePath: string, message: string): Promise<{ commit: string; stdout: string; stderr: string }> {
     return ipcRenderer.invoke('codex-designer:git-commit-all', { workspacePath, message })
+  },
+  gitFetch(workspacePath: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-fetch', workspacePath)
+  },
+  gitPull(workspacePath: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-pull', workspacePath)
+  },
+  gitPush(workspacePath: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-push', workspacePath)
+  },
+  gitListBranches(workspacePath: string): Promise<{ current: string | null; branches: string[] }> {
+    return ipcRenderer.invoke('codex-designer:git-list-branches', workspacePath)
+  },
+  gitCheckout(workspacePath: string, branch: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-checkout', { workspacePath, branch })
+  },
+  gitCreateBranch(workspacePath: string, branch: string, base?: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-create-branch', { workspacePath, branch, base })
+  },
+  gitMerge(workspacePath: string, source: string): Promise<GitCommandResult> {
+    return ipcRenderer.invoke('codex-designer:git-merge', { workspacePath, source })
+  },
+  openInVsCode(workspacePath: string): Promise<{ ok: boolean; method: 'code' | 'os-open'; error?: string }> {
+    return ipcRenderer.invoke('codex-designer:open-in-vscode', workspacePath)
   },
   listRunLogs(filter?: { workspacePath?: string; featureSlug?: string }): Promise<any[]> {
     return ipcRenderer.invoke('codex-designer:list-run-logs', filter)

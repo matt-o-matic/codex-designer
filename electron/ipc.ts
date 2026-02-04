@@ -1,9 +1,24 @@
-import { BrowserWindow, app, clipboard, dialog, ipcMain } from 'electron'
+import { BrowserWindow, app, clipboard, dialog, ipcMain, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { gitCommitAll, gitDiff, gitDiffStat, gitHeadCommit, gitInit, gitStatusPorcelain, isGitRepo } from './lib/git'
+import {
+  gitCheckout,
+  gitCommitAll,
+  gitCreateBranch,
+  gitDiff,
+  gitDiffStat,
+  gitFetch,
+  gitHeadCommit,
+  gitInit,
+  gitListLocalBranches,
+  gitMerge,
+  gitPull,
+  gitPush,
+  gitStatusPorcelain,
+  isGitRepo,
+} from './lib/git'
 import { updateGitignore } from './lib/gitignore'
 import { listCodexModels } from './lib/codexModels'
 import { CodexRunManager, type StartRunArgs } from './lib/codexRuns'
@@ -262,6 +277,34 @@ export function registerIpcHandlers() {
       features: await listFeatures(workspacePath),
     }
   })
+
+  ipcMain.handle(
+    'codex-designer:get-workspace-summary',
+    async (_event, workspacePath: string): Promise<WorkspaceSummary> => {
+      const stats = await fs.stat(workspacePath)
+      if (!stats.isDirectory()) throw new Error('Workspace path is not a directory.')
+
+      const wsState = await readWorkspaceState(workspacePath)
+      const shareability = wsState.shareability ?? null
+
+      const gitRepo = await isGitRepo(workspacePath)
+      let isClean: boolean | null = null
+      let headCommit: string | null = null
+      if (gitRepo) {
+        isClean = (await gitStatusPorcelain(workspacePath)).trim().length === 0
+        headCommit = await gitHeadCommit(workspacePath).catch(() => null)
+      }
+
+      return {
+        path: workspacePath,
+        isGitRepo: gitRepo,
+        isGitClean: isClean,
+        headCommit,
+        shareability,
+        features: await listFeatures(workspacePath),
+      }
+    }
+  )
 
   ipcMain.handle(
     'codex-designer:set-workspace-shareability',
@@ -526,6 +569,72 @@ export function registerIpcHandlers() {
       args: { workspacePath: string; message: string }
     ): Promise<{ commit: string; stdout: string; stderr: string }> => {
       return gitCommitAll(args.workspacePath, args.message)
+    }
+  )
+
+  ipcMain.handle('codex-designer:git-fetch', async (_event, workspacePath: string) => {
+    if (!(await isGitRepo(workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitFetch(workspacePath)
+  })
+
+  ipcMain.handle('codex-designer:git-pull', async (_event, workspacePath: string) => {
+    if (!(await isGitRepo(workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitPull(workspacePath)
+  })
+
+  ipcMain.handle('codex-designer:git-push', async (_event, workspacePath: string) => {
+    if (!(await isGitRepo(workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitPush(workspacePath)
+  })
+
+  ipcMain.handle('codex-designer:git-list-branches', async (_event, workspacePath: string) => {
+    if (!(await isGitRepo(workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitListLocalBranches(workspacePath)
+  })
+
+  ipcMain.handle('codex-designer:git-checkout', async (_event, args: { workspacePath: string; branch: string }) => {
+    if (!(await isGitRepo(args.workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitCheckout(args.workspacePath, args.branch)
+  })
+
+  ipcMain.handle(
+    'codex-designer:git-create-branch',
+    async (_event, args: { workspacePath: string; branch: string; base?: string }) => {
+      if (!(await isGitRepo(args.workspacePath))) throw new Error('Workspace is not a git repo.')
+      return gitCreateBranch(args.workspacePath, args.branch, args.base)
+    }
+  )
+
+  ipcMain.handle('codex-designer:git-merge', async (_event, args: { workspacePath: string; source: string }) => {
+    if (!(await isGitRepo(args.workspacePath))) throw new Error('Workspace is not a git repo.')
+    return gitMerge(args.workspacePath, args.source)
+  })
+
+  ipcMain.handle(
+    'codex-designer:open-in-vscode',
+    async (_event, workspacePath: string): Promise<{ ok: boolean; method: 'code' | 'os-open'; error?: string }> => {
+      const p = String(workspacePath ?? '').trim()
+      if (!p) throw new Error('Missing workspace path.')
+
+      const tryCode = async (cmd: string): Promise<boolean> => {
+        try {
+          await execFileAsync(cmd, ['--reuse-window', p], { timeout: 5000, maxBuffer: 1024 * 1024 })
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      const ok = (await tryCode('code')) || (process.platform === 'win32' && (await tryCode('code.cmd')))
+      if (ok) return { ok: true, method: 'code' }
+
+      try {
+        const err = await shell.openPath(p)
+        if (!err) return { ok: true, method: 'os-open' }
+        return { ok: false, method: 'os-open', error: err }
+      } catch (e) {
+        return { ok: false, method: 'os-open', error: e instanceof Error ? e.message : String(e) }
+      }
     }
   )
 
