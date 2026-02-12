@@ -145,13 +145,13 @@ async function createFeature() {
   submitError.value = null
   submitRunId.value = null
 
-	try {
-	  const briefText = String(brief.value ?? '').trim()
+  try {
+    const briefText = String(brief.value ?? '').trim()
 
-	  // 1. Create stub artifacts immediately
-	  const stubQnaState: QnaStateV1 = createEmptyQnaStateV1(nextSlug)
-	  const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
-	  const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
+    // 1. Create stub artifacts immediately
+    const stubQnaState: QnaStateV1 = createEmptyQnaStateV1(nextSlug)
+    const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
+    const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
 
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(stubQnaState, null, 2) + '\n')
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, stubQnaMd)

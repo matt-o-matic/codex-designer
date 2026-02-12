@@ -94,6 +94,13 @@ function scrollToBottom() {
   el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
 }
 
+watch(mode, async () => {
+  await nextTick()
+  scrollToBottom()
+  // Immediate check for scroll position to update arrow visibility
+  onScroll()
+})
+
 /* -------------------------------------------------------------------------
    Docs Pane Resizing
    ------------------------------------------------------------------------- */
@@ -243,20 +250,20 @@ const draftSelected = ref<Record<string, string>>({})
 const draftNotes = ref<Record<string, string>>({})
 
 const qnaRounds = computed(() => qnaState.value?.rounds ?? [])
-	const qnaComplete = computed(() => {
-	  const rounds = qnaRounds.value
-	  if (!rounds.length) return false
-	  const last = rounds[rounds.length - 1]
-	  return (last?.questions?.length ?? 0) === 0
-	})
+const qnaComplete = computed(() => {
+  const rounds = qnaRounds.value
+  if (!rounds.length) return false
+  const last = rounds[rounds.length - 1]
+  return (last?.questions?.length ?? 0) === 0
+})
 
-	const testPlan = ref<TestPlan | null>(null)
-	const testLoadError = ref<string | null>(null)
+const testPlan = ref<TestPlan | null>(null)
+const testLoadError = ref<string | null>(null)
 
-	// NOTE: This must be defined before the immediate watch() that calls loadRunLogs(),
-	// otherwise we'll hit the temporal-dead-zone for this ref.
-	const runLogsLoading = ref(false)
-	const runLogsById = ref<Record<string, { meta: any; events: unknown[] }>>({})
+// NOTE: This must be defined before the immediate watch() that calls loadRunLogs(),
+// otherwise we'll hit the temporal-dead-zone for this ref.
+const runLogsLoading = ref(false)
+const runLogsById = ref<Record<string, { meta: any; events: unknown[] }>>({})
 
 const houseStyleMarkdown = ref('')
 
@@ -683,7 +690,7 @@ async function applyPlanningNextRoundOutput(runId: string) {
   await loadArtifacts()
 }
 
-async function runNextPlanningRound() {
+async function runNextPlanningRound(notes?: string) {
   if (qnaLocked.value) return
   if (isRoleBusy('planning')) return
   if (!qnaState.value) return
@@ -702,10 +709,12 @@ async function runNextPlanningRound() {
   const nextRoundNumber = (qnaState.value?.rounds?.length ?? 0) + 1
   const images = extractWorkspaceImagePaths(qnaMarkdown.value)
 
+  const combinedNotes = [qnaPlanNotes.value, notes].filter(Boolean).join('\n\n')
+
   const prompt = buildPlanningNextRoundPrompt({
     featureSlug: props.featureSlug,
     nextRoundNumber,
-    additionalNotes: qnaPlanNotes.value,
+    additionalNotes: combinedNotes,
     houseStyleMarkdown: houseStyleMarkdown.value,
   })
 
@@ -822,16 +831,42 @@ const composerExpanded = ref(false)
 const composerText = ref('')
 
 function canSendComposer(): boolean {
+  const role = targetMode.value
+  if (isRoleBusy(role)) return false
+
+  if (role === 'planning') {
+    return !qnaLocked.value && !!qnaState.value && !qnaComplete.value
+  }
+  if (role === 'testing') {
+    return !!testPlan.value
+  }
+
   const text = String(composerText.value ?? '').trim()
-  if (!text.length) return false
-  return !isRoleBusy(targetMode.value)
+  return text.length > 0
 }
 
 async function sendComposer() {
   const text = String(composerText.value ?? '').trim()
-  if (!text.length) return
   const role = targetMode.value
   if (isRoleBusy(role)) return
+
+  if (role === 'planning') {
+    await runNextPlanningRound(text)
+    composerText.value = ''
+    composerExpanded.value = false
+    return
+  }
+
+  if (role === 'testing') {
+    await startTestingRound()
+    composerText.value = ''
+    composerExpanded.value = false
+    // Note: currently testing rounds are local, but we might want to send a message to Codex too?
+    // For now, let's just do what the "New Round" button did.
+    return
+  }
+
+  if (!text.length) return
 
   await loadHouseStyle()
 
@@ -1266,19 +1301,19 @@ const todoOverlay = computed<TodoOverlayState | null>(() => {
   return null
 })
 
-	watch(
-	  () => todoOverlay.value?.runId ?? null,
-	  (next) => {
-	    if (!next) return
-	    if (todoDismissedRunId.value === next) return
-	    todoDismissedRunId.value = null
-	  }
-	)
+watch(
+  () => todoOverlay.value?.runId ?? null,
+  (next) => {
+    if (!next) return
+    if (todoDismissedRunId.value === next) return
+    todoDismissedRunId.value = null
+  }
+)
 
-	function runTitle(r: RunCardRecord): string {
-	  if (r.uiAction) return r.uiAction
-	  return `${r.role ?? 'run'}`
-	}
+function runTitle(r: RunCardRecord): string {
+  if (r.uiAction) return r.uiAction
+  return `${r.role ?? 'run'}`
+}
 
 function abort(runId: string) {
   void abortRun(runId).catch((e) => showToast(e instanceof Error ? e.message : String(e)))
@@ -1327,11 +1362,11 @@ onMounted(() => {
               <div class="flex items-center justify-between">
                 <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">Planning Actions</h3>
                 <div class="flex gap-2">
-                   <button
+                  <button
                     class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
                     type="button"
                     :disabled="qnaLocked || isRoleBusy('planning') || qnaComplete"
-                    @click="runNextPlanningRound"
+                    @click="runNextPlanningRound()"
                   >
                     <span class="material-symbols-rounded text-[16px]">play_arrow</span>
                     Next Round
@@ -1375,8 +1410,8 @@ onMounted(() => {
                     :disabled="!testPlan || isRoleBusy('testing')"
                     @click="startTestingRound().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
                   >
-                    <span class="material-symbols-rounded text-[16px]">add</span>
-                    New Round
+                    <span class="material-symbols-rounded text-[16px]">play_arrow</span>
+                    Next Round
                   </button>
                  </div>
               </div>
@@ -1485,7 +1520,7 @@ onMounted(() => {
                   :min-rows="2"
                   :max-rows="12"
                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none ring-0 placeholder:text-gray-400 focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:placeholder:text-gray-500 dark:focus:border-brand-500 dark:focus:bg-gray-950"
-                  placeholder="Type a message..."
+                  :placeholder="targetMode === 'implementation' ? 'Type a message...' : 'Add notes for the next round... (optional)'"
                   :disabled="isRoleBusy(targetMode)"
                   @paste="onPasteComposer($event as ClipboardEvent)"
                   @keydown.enter.prevent="() => { if (!isRoleBusy(targetMode) && canSendComposer()) sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e))) }"
@@ -1525,8 +1560,8 @@ onMounted(() => {
                     :disabled="!canSendComposer() || isRoleBusy(targetMode)"
                     @click="sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
                   >
-                    Send
-                    <span class="material-symbols-rounded text-[16px]">send</span>
+                    {{ targetMode === 'implementation' ? 'Send' : 'Next Round' }}
+                    <span class="material-symbols-rounded text-[16px]">{{ targetMode === 'implementation' ? 'send' : 'play_arrow' }}</span>
                   </button>
                 </div>
                  <AttachmentPreviews
@@ -1648,12 +1683,12 @@ onMounted(() => {
                                   <span class="font-bold mr-1">{{ opt.key }}</span> {{ opt.text }}
                                 </button>
                               </div>
-	                              <AutoGrowTextarea
-	                                v-model="draftNotes[q.id]"
-	                                class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
-	                                placeholder="Notes..."
-	                                @paste="onPasteQnaNotes($event as ClipboardEvent, q)"
-	                              />
+                              <AutoGrowTextarea
+                                v-model="draftNotes[q.id]"
+                                class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
+                                placeholder="Notes..."
+                                @paste="onPasteQnaNotes($event as ClipboardEvent, q)"
+                              />
                               <button 
                                 class="w-full py-1 bg-brand-600 text-white rounded text-[10px] font-bold"
                                 @click="saveQnaAnswer(q)"
