@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useAppState } from '../lib/appState'
+import { useAppState, type FeatureSummary } from '../lib/appState'
 import { useNewFeatureUi } from '../lib/newFeatureUi'
 import { useRunStore } from '../lib/runStore'
 import { useWorkbenchUi } from '../lib/workbenchUi'
@@ -147,8 +147,25 @@ type WorkspaceNavEntry = {
   loaded: boolean
   workspaceMatches: boolean
   matchingFeaturesCount: number
-  visibleFeatures: Array<{ slug: string }>
+  visibleFeatures: FeatureSummary[]
   forceExpanded: boolean
+}
+
+function getLastActivity(workspacePath: string, feature: FeatureSummary): number {
+  const fsTime = feature.updatedAtMs ?? 0
+  
+  // Check run store for more recent activity
+  const allRuns = Object.values(runs.value ?? {})
+  let lastRunTime = 0
+  
+  for (const r of allRuns) {
+    if (r && r.featureSlug === feature.slug && (!r.workspacePath || r.workspacePath === workspacePath)) {
+      if (r.startedAt > lastRunTime) lastRunTime = r.startedAt
+      if (typeof r.endedAt === 'number' && r.endedAt > lastRunTime) lastRunTime = r.endedAt
+    }
+  }
+  
+  return Math.max(fsTime, lastRunTime)
 }
 
 const workspaceEntries = computed<WorkspaceNavEntry[]>(() => {
@@ -167,7 +184,15 @@ const workspaceEntries = computed<WorkspaceNavEntry[]>(() => {
     const include = !q || workspaceMatches || matchingFeatures.length > 0
     if (!include) continue
 
-    const visibleFeatures = ws ? (q && !workspaceMatches ? matchingFeatures : ws.features) : []
+    let visibleFeatures = ws ? (q && !workspaceMatches ? matchingFeatures : ws.features) : []
+    
+    // Sort features by last updated / accessed
+    if (visibleFeatures.length > 0) {
+       visibleFeatures = visibleFeatures.slice().sort((a, b) => {
+         return getLastActivity(path, b) - getLastActivity(path, a)
+       })
+    }
+
     const forceExpanded = !!q && (workspaceMatches || matchingFeatures.length > 0)
 
     out.push({
@@ -180,7 +205,9 @@ const workspaceEntries = computed<WorkspaceNavEntry[]>(() => {
       forceExpanded,
     })
   }
-  return out
+
+  // Sort workspaces alphabetically
+  return out.sort((a, b) => a.label.localeCompare(b.label))
 })
 
 type UsageSummary = { inputTokens: number; cachedInputTokens: number; outputTokens: number; totalTokens: number }

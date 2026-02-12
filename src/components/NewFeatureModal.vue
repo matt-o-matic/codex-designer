@@ -146,17 +146,44 @@ async function createFeature() {
   submitRunId.value = null
 
   try {
+    const briefText = String(brief.value ?? '').trim()
+
+    // 1. Create stub artifacts immediately
+    const stubQnaState: QnaStateV1 = {
+      version: 1,
+      featureSlug: nextSlug,
+      updatedAt: new Date().toISOString(),
+      rounds: [],
+    }
+    const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
+    const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
+
+    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(stubQnaState, null, 2) + '\n')
+    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, stubQnaMd)
+    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.plan.md`, stubPlan)
+
+    // 2. Switch to the session
     await openWorkspace(workspacePath)
     setWorkspaceExpanded(workspacePath, true)
+    selectSession(workspacePath, nextSlug)
+    closeNewFeature()
 
+    // 3. Start background generation (run)
+    // We do NOT await this part to block the UI, but we catch errors to show them via toast?
+    // Since closeNewFeature() is called, this component might unmount.
+    // However, Vue component methods continue to execute even if the component is unmounted,
+    // as long as we don't access reactive state that has been destroyed.
+    // But validation/setup is done, so we are safe to run this detached.
+    
+    // We capture necessary variables in closure
     const houseStyleMarkdown = await readHouseStyle(workspacePath)
     const prompt = buildPlanningCreatePrompt({
       featureSlug: nextSlug,
-      brief: String(brief.value ?? '').trim(),
+      brief: briefText,
       houseStyleMarkdown,
     })
 
-    const runId = await startRun({
+    startRun({
       workspacePath,
       featureSlug: nextSlug,
       role: 'planning',
@@ -164,31 +191,33 @@ async function createFeature() {
       input: prompt,
       outputSchema: PLAN_CREATE_SCHEMA,
       uiAction: 'planning-create',
-      uiUserMessage: `Create feature: ${nextSlug}${brief.value.trim().length ? `\n\n${brief.value.trim()}` : ''}`,
+      uiUserMessage: `Create feature: ${nextSlug}${briefText.length ? `\n\n${briefText}` : ''}`,
+    }).then(async (runId) => {
+      // NOTE: We do not set submitRunId.value here because the modal is closed.
+      const rec = await waitForRunDone(runId)
+      if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
+      if (!rec.finalResponse) throw new Error('No structured output received.')
+
+      const parsedRes = parseLenientJson(rec.finalResponse)
+      if (!parsedRes) throw new Error('Failed to parse structured output.')
+      const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
+      const qnaState = normalizeQnaStateV1(parsed.qna).state
+      const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
+      const qnaMd = renderQnaMarkdownFromState(qnaState)
+
+      await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\n')
+      await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, qnaMd)
+      await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.plan.md`, plan)
+      
+      // Notify UI to reload artifacts
+      window.dispatchEvent(new CustomEvent('codex-designer:artifacts-updated'))
+    }).catch((e) => {
+      console.error('Values creation background run failed:', e)
+      // Ideally show a toast here, but we don't have access to global toast system easily unless we import it
     })
 
-    submitRunId.value = runId
-    const rec = await waitForRunDone(runId)
-    if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
-    if (!rec.finalResponse) throw new Error('No structured output received.')
-
-    const parsedRes = parseLenientJson(rec.finalResponse)
-    if (!parsedRes) throw new Error('Failed to parse structured output.')
-    const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
-    const qnaState = normalizeQnaStateV1(parsed.qna).state
-    const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
-    const qnaMd = renderQnaMarkdownFromState(qnaState)
-
-    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\n')
-    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, qnaMd)
-    await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.plan.md`, plan)
-
-    await openWorkspace(workspacePath)
-    selectSession(workspacePath, nextSlug)
-    closeNewFeature()
   } catch (e) {
     submitError.value = e instanceof Error ? e.message : String(e)
-  } finally {
     submitting.value = false
   }
 }

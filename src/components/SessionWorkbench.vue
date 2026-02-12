@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { parseLenientJson } from '../lib/json'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
 import {
@@ -20,9 +20,8 @@ import { useRunStore, type ModelReasoningEffort, type RunRecord } from '../lib/r
 import { createEmptyTestPlan, ensureRound, renderTestMarkdown, type TestPlan, type TestRound, type TestStatus } from '../lib/tests'
 import { useWorkbenchUi, type SessionMode } from '../lib/workbenchUi'
 import AutoGrowTextarea from './AutoGrowTextarea.vue'
+import MarkdownViewer from './MarkdownViewer.vue'
 import AttachmentPreviews from './AttachmentPreviews.vue'
-import TimelineCard from './timeline/TimelineCard.vue'
-import DocumentCard from './timeline/DocumentCard.vue'
 import RunCard from './timeline/RunCard.vue'
 import ToastHost from './ToastHost.vue'
 
@@ -74,6 +73,80 @@ const configs = ref<Record<SessionMode, ModeConfig>>({
 const dockTargetOverride = ref<'current' | SessionMode>('current')
 const targetMode = computed<SessionMode>(() => (dockTargetOverride.value === 'current' ? mode.value : dockTargetOverride.value))
 const targetConfig = computed(() => configs.value[targetMode.value])
+const activeDocumentTab = ref<'plan' | 'qna' | 'tests' | 'todos'>('plan')
+
+/* -------------------------------------------------------------------------
+   Scroll Management (Chat / Left Pane)
+   ------------------------------------------------------------------------- */
+const scrollContainer = ref<HTMLDivElement | null>(null)
+const showScrollBottom = ref(false)
+
+function onScroll() {
+  const el = scrollContainer.value
+  if (!el) return
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+  showScrollBottom.value = dist > 50
+}
+
+function scrollToBottom() {
+  const el = scrollContainer.value
+  if (!el) return
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+}
+
+/* -------------------------------------------------------------------------
+   Docs Pane Resizing
+   ------------------------------------------------------------------------- */
+const DOCS_PANE_WIDTH_KEY = 'codex-designer:docs-pane-width'
+const docsPaneWidth = ref(400)
+const isResizingDocs = ref(false)
+
+function clampDocsWidth(px: number): number {
+  const min = 300
+  const max = 1200 // fairly wide on large screens
+  if (!Number.isFinite(px)) return 400
+  return Math.max(min, Math.min(max, Math.round(px)))
+}
+
+try {
+  const raw = localStorage.getItem(DOCS_PANE_WIDTH_KEY)
+  const parsed = raw ? Number(raw) : NaN
+  if (Number.isFinite(parsed)) docsPaneWidth.value = clampDocsWidth(parsed)
+} catch {
+  // ignore
+}
+
+function startResizingDocs(e: MouseEvent) {
+  isResizingDocs.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  const startX = e.clientX
+  const startWidth = docsPaneWidth.value
+
+  const moveHandler = (ev: MouseEvent) => {
+    // Pane is on the right. Moving left (smaller X) means simpler logic:
+    // New Width = Start Width + (Start X - Current X)
+    const delta = startX - ev.clientX
+    docsPaneWidth.value = clampDocsWidth(startWidth + delta)
+  }
+
+  const upHandler = () => {
+    isResizingDocs.value = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', moveHandler)
+    window.removeEventListener('mouseup', upHandler)
+    try {
+      localStorage.setItem(DOCS_PANE_WIDTH_KEY, String(docsPaneWidth.value))
+    } catch {
+      // ignore
+    }
+  }
+
+  window.addEventListener('mousemove', moveHandler)
+  window.addEventListener('mouseup', upHandler)
+}
 
 function modelValue(cfg: ModeConfig): string {
   if (cfg.modelChoice === 'default') return ''
@@ -310,6 +383,15 @@ async function loadArtifacts() {
 
   artifactsLoading.value = false
 }
+
+// Allow external triggers to reload artifacts (e.g. background creation completing)
+const onArtifactsUpdated = () => void loadArtifacts()
+onMounted(() => {
+  window.addEventListener('codex-designer:artifacts-updated', onArtifactsUpdated)
+})
+onUnmounted(() => {
+  window.removeEventListener('codex-designer:artifacts-updated', onArtifactsUpdated)
+})
 
 watch(
   () => [props.workspacePath, props.featureSlug],
@@ -1008,7 +1090,7 @@ async function loadRunLogs() {
         const runId = String(m?.runId ?? '').trim()
         if (!runId) return
         try {
-          const log = await window.codexDesigner!.readRunLog(runId, 500)
+          const log = await window.codexDesigner!.readRunLog(runId, 2000)
           map[runId] = { meta: (log.meta ?? m) as any, events: Array.isArray(log.events) ? log.events : [] }
         } catch {
           map[runId] = { meta: m, events: [] }
@@ -1127,6 +1209,23 @@ const runsByMode = computed(() => {
   return by
 })
 
+// Watch active runs to auto-scroll if near bottom
+watch(
+  () => runsByMode.value[mode.value].length,
+  async () => {
+    // Only scroll if we were already relatively close to bottom or it's a new run
+    await nextTick()
+    if (!scrollContainer.value) return
+    const el = scrollContainer.value
+    // Simple logic: just scroll to bottom on new run cards for now
+    // A more complex logic would check if user is reading up history
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (dist < 400) {
+      scrollToBottom()
+    }
+  }
+)
+
 type TodoOverlayItem = { text: string; completed: boolean }
 type TodoOverlayState = { runId: string; role: SessionMode | null; items: TodoOverlayItem[]; done: number; total: number }
 
@@ -1199,628 +1298,444 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <TimelineCard
-      icon="forum"
-      :title="featureSlug"
-      :subtitle="`${shortWorkspaceLabel(workspacePath)} · ${mode}`"
-      tone="brand"
-    >
-      <div v-if="artifactsLoading" class="rounded-xl bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-950 dark:text-gray-300">
-        Loading session artifacts…
+  <div class="flex h-full flex-col overflow-hidden bg-white dark:bg-gray-900">
+    <!-- Header -->
+    <div class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
+      <div class="flex items-center gap-3">
+        <h2 class="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100">{{ featureSlug }}</h2>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ shortWorkspaceLabel(workspacePath) }}</span>
       </div>
-      <div v-else class="grid gap-2 sm:grid-cols-2">
-        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200">
-          <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Plan</div>
-          <div class="mt-1">
-            <span v-if="planLoadError" class="text-amber-700 dark:text-amber-200">Missing</span>
-            <span v-else class="text-emerald-700 dark:text-emerald-200">Loaded</span>
-          </div>
-        </div>
-        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200">
-          <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Q&amp;A</div>
-          <div class="mt-1">
-            <span v-if="qnaLoadError" class="text-amber-700 dark:text-amber-200">Missing</span>
-            <span v-else class="text-emerald-700 dark:text-emerald-200">Loaded</span>
-            <span
-              v-if="qnaLocked"
-              class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-black text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
-            >
-              locked
-            </span>
-          </div>
-        </div>
-      </div>
-    </TimelineCard>
-
-    <div v-if="mode === 'planning'" class="space-y-4 pb-24">
-      <div v-if="planLoadError" class="rounded-xl bg-gray-50 p-4 text-sm text-gray-600 dark:bg-gray-950 dark:text-gray-300">
-        Plan file not found for this session.
-      </div>
-      <DocumentCard
-        v-else
-        icon="description"
-        title="Plan document"
-        :subtitle="`docs/${featureSlug}.plan.md`"
-        :markdown="planMarkdown"
-      />
-
-      <TimelineCard
-        v-if="qnaLocked"
-        icon="lock"
-        title="Planning locked"
-        subtitle="Implementation has started for this session."
-        tone="warn"
-      >
-        <div class="text-sm text-gray-600 dark:text-gray-300">
-          Q&amp;A edits and next-round generation are disabled after implementation begins (v1 safety).
-        </div>
-      </TimelineCard>
-
-      <TimelineCard icon="settings" title="Planning actions">
-        <div v-if="qnaLoadError" class="text-sm text-gray-600 dark:text-gray-300">
-          Q&amp;A state not found yet.
-        </div>
-        <div v-else class="space-y-3">
-          <div>
-            <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Additional notes</div>
-            <AutoGrowTextarea
-              v-model="qnaPlanNotes"
-              :min-rows="2"
-              :max-rows="6"
-              class="mt-2 w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-              :disabled="qnaLocked || isRoleBusy('planning')"
-            />
-            <div v-if="qnaPlanNotesError" class="mt-2 text-xs font-semibold text-red-700 dark:text-red-200">
-              {{ qnaPlanNotesError }}
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
-              type="button"
-              :disabled="qnaLocked || isRoleBusy('planning') || qnaComplete"
-              @click="runNextPlanningRound"
-            >
-              <span class="material-symbols-rounded text-[18px]">play_arrow</span>
-              Generate next round
-            </button>
-
-            <button
-              class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-black text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
-              type="button"
-              :disabled="qnaLocked || isRoleBusy('planning')"
-              @click="saveQnaPlanNotes().then(() => showToast('Notes saved')).catch((e) => (qnaPlanNotesError = e instanceof Error ? e.message : String(e)))"
-            >
-              <span class="material-symbols-rounded text-[18px]">save</span>
-              Save notes
-            </button>
-          </div>
-        </div>
-      </TimelineCard>
-
-      <div v-if="qnaState" class="space-y-3">
-        <details
-          v-for="round in qnaRounds"
-          :key="round.id"
-          class="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
-          :open="qnaRoundOpen[round.id] === true"
+      
+      <div class="flex items-center gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+        <button
+          v-for="m in (['planning', 'implementation', 'testing'] as const)"
+          :key="m"
+          class="rounded-md px-3 py-1.5 text-xs font-bold transition-colors"
+          :class="mode === m ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100' : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'"
+          @click="setMode(m)"
         >
-          <summary
-            class="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3"
-            @click.prevent="toggleRound(round.id)"
-          >
-            <div class="min-w-0">
-              <div class="truncate text-sm font-black">{{ round.title }}</div>
-              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ round.questions.length }} questions
-              </div>
-            </div>
-            <span class="material-symbols-rounded text-[20px] text-gray-400">
-              {{ qnaRoundOpen[round.id] ? 'expand_less' : 'expand_more' }}
-            </span>
-          </summary>
+          {{ m.charAt(0).toUpperCase() + m.slice(1) }}
+        </button>
+      </div>
+    </div>
 
-          <div class="px-4 pb-4">
-            <div v-if="!round.questions.length" class="rounded-xl bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-950 dark:text-gray-300">
-              Planning complete.
-            </div>
-
-            <div v-else class="space-y-3">
-              <div
-                v-for="q in round.questions"
-                :key="q.id"
-                class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ q.id }}</div>
-                    <div class="mt-1 text-sm font-black text-gray-900 dark:text-gray-100">
-                      {{ q.prompt }}
-                    </div>
-                  </div>
-
-                  <button
-                    class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+    <!-- Main Content -->
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <!-- Left: Activity / Chat -->
+      <div class="flex flex-1 flex-col overflow-hidden relative">
+        <div
+          ref="scrollContainer"
+          class="flex-1 overflow-y-auto p-4 scroll-smooth"
+          @scroll="onScroll"
+        >
+          <div class="mx-auto max-w-3xl space-y-6">
+            
+            <!-- Context cards based on mode (if needed for quick actions) -->
+            <div v-if="mode === 'planning'" class="rounded-xl border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/20">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">Planning Actions</h3>
+                <div class="flex gap-2">
+                   <button
+                    class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
                     type="button"
-                    :disabled="qnaLocked"
-                    @click="toggleQuestionEdit(q)"
+                    :disabled="qnaLocked || isRoleBusy('planning') || qnaComplete"
+                    @click="runNextPlanningRound"
                   >
-                    <span class="material-symbols-rounded text-[18px]">{{ qnaEditOpen[q.id] ? 'close' : 'edit' }}</span>
-                    {{ qnaEditOpen[q.id] ? 'Close' : 'Edit' }}
+                    <span class="material-symbols-rounded text-[16px]">play_arrow</span>
+                    Next Round
                   </button>
                 </div>
-
-                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  <span class="rounded-full bg-gray-100 px-2 py-0.5 font-mono font-black text-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                    {{ inferredSelectedKey(q) }}
-                  </span>
-                  <span class="font-semibold text-gray-700 dark:text-gray-200">
-                    {{ selectedOptionText(q, inferredSelectedKey(q)) }}
-                  </span>
-                </div>
-
-                <div v-if="qnaEditOpen[q.id]" class="mt-3 space-y-3">
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      v-for="opt in q.options"
-                      :key="opt.key"
-                      class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-colors"
-                      :class="
-                        inferredSelectedKey(q) === opt.key
-                          ? 'bg-brand-600 text-white shadow-brand-600/20'
-                          : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
-                      "
-                      type="button"
-                      :disabled="qnaLocked"
-                      @click="draftSelected = { ...draftSelected, [q.id]: opt.key }"
-                    >
-                      <span class="rounded-full bg-black/10 px-2 py-0.5 font-mono text-[10px] font-black" :class="inferredSelectedKey(q) === opt.key ? 'text-white' : 'text-gray-700 dark:text-gray-200'">
-                        {{ opt.key }}
-                      </span>
-                      <span class="truncate">{{ opt.text }}</span>
-                      <span v-if="opt.recommended" class="material-symbols-rounded text-[16px]">star</span>
-                    </button>
-                  </div>
-
-                  <div>
-                    <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Notes</div>
-                    <AttachmentPreviews
-                      v-if="extractWorkspaceImagePaths(String(draftNotes[q.id] ?? '')).length"
-                      :workspace-path="workspacePath"
-                      :attachments="extractWorkspaceImagePaths(String(draftNotes[q.id] ?? ''))"
-                      :max="6"
-                    />
-                    <AutoGrowTextarea
-                      v-model="draftNotes[q.id]"
-                      :min-rows="2"
-                      :max-rows="10"
-                      class="mt-2 w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
-                      placeholder="Add clarifications. Paste images here."
-                      :disabled="qnaLocked"
-                      @paste="onPasteQnaNotes($event as ClipboardEvent, q)"
-                    />
-                  </div>
-
-                  <div class="flex items-center gap-2">
-                    <button
-                      class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
-                      type="button"
-                      :disabled="qnaLocked"
-                      @click="saveQnaAnswer(q)"
-                    >
-                      <span class="material-symbols-rounded text-[18px]">save</span>
-                      Save answer
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
-          </div>
-        </details>
-      </div>
 
-      <div v-if="runsByMode.planning.length" class="space-y-3">
-        <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Planning runs</div>
-        <RunCard
-          v-for="r in runsByMode.planning"
-          :key="r.runId"
-          :run-id="r.runId"
-          :title="runTitle(r)"
-          :subtitle="r.runId"
-          :status="r.status"
-          :started-at="r.startedAt"
-          :ended-at="r.endedAt"
-          :workspace-path="workspacePath"
-          :user-message="r.uiUserMessage ?? ''"
-          :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
-          :input-prompt="r.input ?? ''"
-          :final-response="r.finalResponse"
-          :events="r.events"
-          :meta="r.meta"
-          :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
-          :can-stop="r.status === 'running'"
-          @stop="abort(r.runId)"
-        />
-      </div>
-    </div>
-
-    <div v-else-if="mode === 'testing'" class="space-y-4 pb-24">
-      <DocumentCard icon="checklist" title="Test document" :subtitle="`docs/${featureSlug}.test.md`" :markdown="testMarkdown" />
-
-      <TimelineCard icon="science" title="Testing actions">
-        <div v-if="testLoadError" class="text-sm text-gray-600 dark:text-gray-300">
-          {{ testLoadError }}
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
-            type="button"
-            :disabled="isRoleBusy('testing')"
-            @click="generateTests().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
-          >
-            <span class="material-symbols-rounded text-[18px]">auto_fix_high</span>
-            Generate tests
-          </button>
-          <button
-            class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-black text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
-            type="button"
-            :disabled="!testPlan || isRoleBusy('testing')"
-            @click="startTestingRound().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
-          >
-            <span class="material-symbols-rounded text-[18px]">add</span>
-            Start new round
-          </button>
-        </div>
-      </TimelineCard>
-
-      <div v-if="testPlan && testPlan.tests.length" class="space-y-3">
-        <details
-          v-for="round in testPlan.rounds"
-          :key="round.id"
-          class="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
-        >
-          <summary class="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3">
-            <div class="min-w-0">
-              <div class="truncate text-sm font-black">{{ round.id }}</div>
-              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ round.startedAt }}</div>
+            <div v-else-if="mode === 'implementation'" class="rounded-xl border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/20">
+               <div class="flex items-center justify-between">
+                <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">Implementation Actions</h3>
+                <button
+                  class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+                  type="button"
+                  :disabled="isRoleBusy('implementation')"
+                  @click="runImplementation().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
+                >
+                  <span class="material-symbols-rounded text-[16px]">play_arrow</span>
+                  Implement Plan
+                </button>
+              </div>
+              <div v-if="modelsError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ modelsError }}</div>
             </div>
-            <span class="material-symbols-rounded text-[20px] text-gray-400">expand_more</span>
-          </summary>
 
-          <div class="px-4 pb-4">
-            <div class="space-y-3">
-              <div
-                v-for="t in testPlan.tests"
-                :key="t.id"
-                class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ t.id }}</div>
-                    <div class="mt-1 text-sm font-black text-gray-900 dark:text-gray-100">{{ t.title }}</div>
-                  </div>
-
-                  <select
-                    class="rounded-xl bg-white px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
-                    :value="getResult(round, t.id).status"
-                    @change="setTestStatus(round, t.id, ($event.target as HTMLSelectElement).value).catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
+             <div v-else-if="mode === 'testing'" class="rounded-xl border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/20">
+               <div class="flex items-center justify-between">
+                <h3 class="text-sm font-bold text-gray-900 dark:text-gray-100">Testing Actions</h3>
+                 <div class="flex gap-2">
+                  <button
+                    class="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-gray-700 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+                    type="button"
+                    :disabled="isRoleBusy('testing')"
+                    @click="generateTests().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
                   >
-                    <option value="not_run">not_run</option>
-                    <option value="pass">pass</option>
-                    <option value="fail">fail</option>
-                    <option value="deferred">deferred</option>
-                    <option value="blocked">blocked</option>
-                  </select>
-                </div>
+                    <span class="material-symbols-rounded text-[16px]">auto_fix_high</span>
+                    Generate Tests
+                  </button>
+                  <button
+                    class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+                    type="button"
+                    :disabled="!testPlan || isRoleBusy('testing')"
+                    @click="startTestingRound().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
+                  >
+                    <span class="material-symbols-rounded text-[16px]">add</span>
+                    New Round
+                  </button>
+                 </div>
+              </div>
+            </div>
 
-                <div class="mt-3 text-sm text-gray-600 dark:text-gray-300">
-                  <div v-if="t.description" class="mb-2">{{ t.description }}</div>
-                  <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Steps</div>
-                  <ol class="mt-1 list-decimal space-y-1 pl-5">
-                    <li v-for="(s, idx) in t.steps" :key="idx">{{ s }}</li>
-                  </ol>
-                  <div class="mt-3 text-[10px] font-black uppercase tracking-widest text-gray-400">Expected</div>
-                  <div class="mt-1">{{ t.expected }}</div>
+            <!-- Runs Stream -->
+            <div class="space-y-6">
+              <template v-if="mode === 'planning'">
+                 <div v-if="!runsByMode.planning.length" class="text-center py-10 text-sm text-gray-500">
+                    No planning runs yet. Start by generating the next round.
+                 </div>
+                 <RunCard
+                  v-for="r in runsByMode.planning"
+                  :key="r.runId"
+                  :run-id="r.runId"
+                  :title="runTitle(r)"
+                  :subtitle="r.runId"
+                  :status="r.status"
+                  :started-at="r.startedAt"
+                  :ended-at="r.endedAt"
+                  :workspace-path="workspacePath"
+                  :user-message="r.uiUserMessage ?? ''"
+                  :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
+                  :input-prompt="r.input ?? ''"
+                  :final-response="r.finalResponse"
+                  :events="r.events"
+                  :meta="r.meta"
+                  :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
+                  :can-stop="r.status === 'running'"
+                  @stop="abort(r.runId)"
+                />
+              </template>
+
+              <template v-else-if="mode === 'implementation'">
+                <div v-if="!runsByMode.implementation.length" class="text-center py-10 text-sm text-gray-500">
+                    No implementation runs yet.
+                 </div>
+                 <RunCard
+                  v-for="r in runsByMode.implementation"
+                  :key="r.runId"
+                  :run-id="r.runId"
+                  :title="runTitle(r)"
+                  :subtitle="r.runId"
+                  :status="r.status"
+                  :started-at="r.startedAt"
+                  :ended-at="r.endedAt"
+                  :workspace-path="workspacePath"
+                  :user-message="r.uiUserMessage ?? ''"
+                  :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
+                  :input-prompt="r.input ?? ''"
+                  :final-response="r.finalResponse"
+                  :events="r.events"
+                  :meta="r.meta"
+                  :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
+                  :can-stop="r.status === 'running'"
+                  @stop="abort(r.runId)"
+                />
+              </template>
+
+              <template v-else-if="mode === 'testing'">
+                <div v-if="!runsByMode.testing.length" class="text-center py-10 text-sm text-gray-500">
+                    No testing runs yet.
+                 </div>
+                 <RunCard
+                  v-for="r in runsByMode.testing"
+                  :key="r.runId"
+                  :run-id="r.runId"
+                  :title="runTitle(r)"
+                  :subtitle="r.runId"
+                  :status="r.status"
+                  :started-at="r.startedAt"
+                  :ended-at="r.endedAt"
+                  :workspace-path="workspacePath"
+                  :user-message="r.uiUserMessage ?? ''"
+                  :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
+                  :input-prompt="r.input ?? ''"
+                  :final-response="r.finalResponse"
+                  :events="r.events"
+                  :meta="r.meta"
+                  :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
+                  :can-stop="r.status === 'running'"
+                  @stop="abort(r.runId)"
+                />
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer Area -->
+        <div class="shrink-0 border-t border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 relative">
+          <!-- Scroll to Bottom Button -->
+          <button
+            v-if="showScrollBottom"
+            class="absolute left-1/2 -top-10 -translate-x-1/2 rounded-full border border-gray-200 bg-white p-2 shadow-lg transition-all hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+            @click="scrollToBottom"
+            aria-label="Scroll to bottom"
+          >
+            <span class="material-symbols-rounded block text-[20px] text-brand-600 dark:text-brand-400">arrow_downward</span>
+          </button>
+
+          <div class="mx-auto max-w-3xl">
+            <div class="flex gap-4">
+              <div class="flex-1">
+                 <AutoGrowTextarea
+                  v-model="composerText"
+                  :min-rows="2"
+                  :max-rows="12"
+                  class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none ring-0 placeholder:text-gray-400 focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:placeholder:text-gray-500 dark:focus:border-brand-500 dark:focus:bg-gray-950"
+                  placeholder="Type a message..."
+                  :disabled="isRoleBusy(targetMode)"
+                  @paste="onPasteComposer($event as ClipboardEvent)"
+                  @keydown.enter.prevent="() => { if (!isRoleBusy(targetMode) && canSendComposer()) sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e))) }"
+                />
+                
+                <!-- Composer Controls -->
+                <div class="mt-2 flex items-center justify-between">
+                   <div class="flex items-center gap-2">
+                      <!-- Simplified Model Config (Icon Based?) -->
+                      <select
+                        v-model="targetConfig.modelChoice"
+                        class="rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                        :disabled="modelsLoading"
+                      >
+                        <option value="default">Model: Default</option>
+                        <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                          {{ m.displayName }}
+                        </option>
+                         <option value="custom">Model: Custom</option>
+                      </select>
+
+                      <select
+                        v-model="targetConfig.thinkingChoice"
+                        class="rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      >
+                        <option value="default">Thinking: Default</option>
+                        <option value="minimal">Thinking: Minimal</option>
+                        <option value="low">Thinking: Low</option>
+                        <option value="medium">Thinking: Medium</option>
+                        <option value="high">Thinking: High</option>
+                        <option value="xhigh">Thinking: XHigh</option>
+                      </select>
+                   </div>
+                   <button
+                    class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+                    type="button"
+                    :disabled="!canSendComposer() || isRoleBusy(targetMode)"
+                    @click="sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
+                  >
+                    Send
+                    <span class="material-symbols-rounded text-[16px]">send</span>
+                  </button>
                 </div>
+                 <AttachmentPreviews
+                  v-if="extractWorkspaceImagePaths(composerText).length"
+                  class="mt-2"
+                  :workspace-path="workspacePath"
+                  :attachments="extractWorkspaceImagePaths(composerText)"
+                  :max="6"
+                />
               </div>
             </div>
           </div>
-        </details>
-      </div>
-
-      <div v-if="runsByMode.testing.length" class="space-y-3">
-        <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">Testing runs</div>
-        <RunCard
-          v-for="r in runsByMode.testing"
-          :key="r.runId"
-          :run-id="r.runId"
-          :title="runTitle(r)"
-          :subtitle="r.runId"
-          :status="r.status"
-          :started-at="r.startedAt"
-          :ended-at="r.endedAt"
-          :workspace-path="workspacePath"
-          :user-message="r.uiUserMessage ?? ''"
-          :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
-          :input-prompt="r.input ?? ''"
-          :final-response="r.finalResponse"
-          :events="r.events"
-          :meta="r.meta"
-          :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
-          :can-stop="r.status === 'running'"
-          @stop="abort(r.runId)"
-        />
-      </div>
-    </div>
-
-    <div v-else class="space-y-4 pb-24">
-      <TimelineCard icon="build" title="Implementation">
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
-            type="button"
-            :disabled="isRoleBusy('implementation')"
-            @click="runImplementation().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
-          >
-            <span class="material-symbols-rounded text-[18px]">play_arrow</span>
-            Implement plan
-          </button>
         </div>
-        <div v-if="modelsError" class="mt-3 text-xs font-semibold text-red-700 dark:text-red-200">
-          {{ modelsError }}
-        </div>
-      </TimelineCard>
-
-      <div v-if="runLogsLoading" class="rounded-xl bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-950 dark:text-gray-300">
-        Loading run history…
       </div>
 
-      <div v-if="runsByMode.implementation.length" class="space-y-3">
-        <RunCard
-          v-for="r in runsByMode.implementation"
-          :key="r.runId"
-          :run-id="r.runId"
-          :title="runTitle(r)"
-          :subtitle="r.runId"
-          :status="r.status"
-          :started-at="r.startedAt"
-          :ended-at="r.endedAt"
-          :workspace-path="workspacePath"
-          :user-message="r.uiUserMessage ?? ''"
-          :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
-          :input-prompt="r.input ?? ''"
-          :final-response="r.finalResponse"
-          :events="r.events"
-          :meta="r.meta"
-          :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
-          :can-stop="r.status === 'running'"
-          @stop="abort(r.runId)"
-        />
-      </div>
-      <div v-else class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
-        No implementation runs yet.
-      </div>
-    </div>
-
-    <!-- Bottom dock -->
-    <div
-      class="sticky bottom-3 z-20 rounded-2xl border border-gray-200 bg-white/80 p-3 shadow-lg backdrop-blur dark:border-gray-800 dark:bg-gray-950/70"
-    >
-      <!-- Floating TODO overlay -->
+      <!-- Resize Handle -->
       <div
-        v-if="showTodoOverlay"
-        class="absolute bottom-full right-0 z-30 mb-3 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+        class="w-[5px] cursor-col-resize border-l border-r border-gray-200 bg-gray-50 hover:bg-brand-500 hover:border-brand-500 active:bg-brand-600 active:border-brand-600 dark:border-gray-800 dark:bg-gray-900 dark:hover:bg-brand-400 dark:hover:border-brand-400 dark:active:bg-brand-500 transition-colors z-10 flex-none"
+        @mousedown.prevent="startResizingDocs"
+      ></div>
+
+      <!-- Right: Documents & Tools -->
+      <div 
+        class="flex shrink-0 flex-col bg-gray-50 dark:bg-gray-950"
+        :style="{ width: docsPaneWidth + 'px' }"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="material-symbols-rounded text-[18px] text-brand-500">checklist</span>
-              <div class="text-xs font-black text-gray-900 dark:text-gray-100">TODO</div>
-              <div class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                {{ todoOverlay?.done }}/{{ todoOverlay?.total }}
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-200 px-2 dark:border-gray-800">
+          <button
+            v-for="tab in (['plan', 'qna', 'tests', 'todos'] as const)"
+            :key="tab"
+            class="relative flex-1 px-4 py-3 text-xs font-bold transition-colors hover:text-gray-900 dark:hover:text-gray-100"
+             :class="activeDocumentTab === tab ? 'text-brand-600 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400'"
+            @click="activeDocumentTab = tab"
+          >
+            {{ tab === 'qna' ? 'Q&A' : tab.charAt(0).toUpperCase() + tab.slice(1) }}
+            <span
+              v-if="activeDocumentTab === tab"
+              class="absolute inset-x-0 bottom-0 h-0.5 bg-brand-600 dark:bg-brand-400"
+            />
+          </button>
+        </div>
+
+        <!-- Content -->
+        <div class="flex-1 overflow-y-auto p-4">
+           <!-- Plan Tab -->
+           <div v-if="activeDocumentTab === 'plan'" class="space-y-4">
+             <div v-if="planLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+               {{ planLoadError }}
+             </div>
+             <div v-else class="prose prose-sm prose-gray dark:prose-invert max-w-none">
+                <MarkdownViewer :markdown="planMarkdown || '*No plan content loaded.*'" />
+             </div>
+           </div>
+
+           <!-- Q&A Tab -->
+           <div v-if="activeDocumentTab === 'qna'" class="space-y-4">
+             <div v-if="qnaLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+               {{ qnaLoadError }}
+             </div>
+
+              <!-- Q&A Rounds List -->
+              <div v-if="qnaState" class="space-y-3">
+                 <!-- Note editor component reused here -->
+                 <div class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                    <div class="text-[10px] uppercase font-black tracking-wider text-gray-500 mb-2">Global Notes</div>
+                    <AutoGrowTextarea
+                      v-model="qnaPlanNotes"
+                      :min-rows="2"
+                      :max-rows="6"
+                      class="w-full text-xs bg-transparent outline-none resize-none"
+                      placeholder="Add high-level implementation notes..."
+                      :disabled="qnaLocked"
+                    />
+                    <div class="mt-2 flex justify-end">
+                       <button
+                        class="text-[10px] font-bold text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                         :disabled="qnaLocked"
+                         @click="saveQnaPlanNotes().then(() => showToast('Notes saved'))"
+                       >
+                         Save Notes
+                       </button>
+                    </div>
+                 </div>
+
+                 <div v-for="round in qnaRounds" :key="round.id" class="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
+                    <div 
+                      class="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100 dark:bg-gray-800/50 dark:hover:bg-gray-800"
+                      @click="toggleRound(round.id)"
+                    >
+                       <span class="text-xs font-bold">{{ round.title }}</span>
+                       <span class="material-symbols-rounded text-[16px]">{{ qnaRoundOpen[round.id] ? 'expand_less' : 'expand_more' }}</span>
+                    </div>
+                    
+                    <div v-if="qnaRoundOpen[round.id]" class="p-3 space-y-3">
+                        <div v-for="q in round.questions" :key="q.id" class="space-y-2">
+                           <div class="text-xs font-medium text-gray-800 dark:text-gray-200">{{ q.prompt }}</div>
+                           <!-- Minimal view of answer -->
+                           <div class="text-xs pl-2 border-l-2 border-brand-500 text-gray-600 dark:text-gray-400">
+                              {{ selectedOptionText(q, inferredSelectedKey(q)) || 'Not answered' }}
+                           </div>
+                           <button 
+                             class="text-[10px] text-brand-600 underline"
+                             @click="toggleQuestionEdit(q)"
+                           >
+                              {{ qnaEditOpen[q.id] ? 'Close Editor' : 'Edit Answer' }}
+                           </button>
+
+                           <!-- Inline Editor (Simplified) -->
+                           <div v-if="qnaEditOpen[q.id]" class="mt-2 space-y-2 rounded-lg bg-gray-50 p-2 dark:bg-gray-800">
+                              <div class="flex flex-col gap-1">
+                                <button
+                                  v-for="opt in q.options"
+                                  :key="opt.key"
+                                  class="text-left text-[10px] px-2 py-1.5 rounded border"
+                                  :class="inferredSelectedKey(q) === opt.key ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700'"
+                                  @click="draftSelected = { ...draftSelected, [q.id]: opt.key }"
+                                >
+                                  <span class="font-bold mr-1">{{ opt.key }}</span> {{ opt.text }}
+                                </button>
+                              </div>
+                              <AutoGrowTextarea
+                                v-model="draftNotes[q.id]"
+                                class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
+                                placeholder="Notes..."
+                              />
+                              <button 
+                                class="w-full py-1 bg-brand-600 text-white rounded text-[10px] font-bold"
+                                @click="saveQnaAnswer(q)"
+                              >
+                                Save
+                              </button>
+                           </div>
+                        </div>
+                    </div>
+                 </div>
               </div>
-              <div
-                v-if="todoOverlay?.role"
-                class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              >
-                {{ todoOverlay?.role }}
+           </div>
+
+           <!-- Tests Tab -->
+           <div v-if="activeDocumentTab === 'tests'" class="space-y-4">
+              <div v-if="testLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+               {{ testLoadError }}
+             </div>
+             
+             <div v-if="testPlan" class="space-y-4">
+                 <!-- Test Rounds -->
+                 <div v-for="round in testPlan.rounds" :key="round.id" class="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+                    <div class="px-3 py-2 bg-gray-50 text-xs font-bold border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                       {{ round.id }} <span class="font-normal text-gray-500 ml-2">{{ new Date(round.startedAt).toLocaleDateString() }}</span>
+                    </div>
+                    <div class="p-3 space-y-3">
+                       <div v-for="t in testPlan.tests" :key="t.id" class="flex items-start justify-between gap-2 text-xs">
+                          <div class="font-medium flex-1">{{ t.id }}: {{ t.title }}</div>
+                          <select
+                            class="shrink-0 rounded border-gray-200 py-0.5 pl-2 pr-6 text-xs"
+                            :value="getResult(round, t.id).status"
+                            @change="setTestStatus(round, t.id, ($event.target as HTMLSelectElement).value).catch(console.error)"
+                          >
+                             <option value="not_run">Not Run</option>
+                             <option value="pass">Pass</option>
+                             <option value="fail">Fail</option>
+                             <option value="deferred">Deferred</option>
+                          </select>
+                       </div>
+                    </div>
+                 </div>
+             </div>
+             <div v-else class="text-xs text-gray-500">No test plan loaded.</div>
+           </div>
+
+           <!-- Todos Tab -->
+           <div v-if="activeDocumentTab === 'todos'" class="space-y-4">
+              <!-- Show aggregate todos from recent runs -->
+              <!-- TODO: Needs logic to aggregate or finding the "master" todo list -->
+              <div class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                 <div class="text-[10px] uppercase font-black tracking-wider text-gray-500 mb-2">
+                    Latest Todo List
+                    <span v-if="todoOverlay?.runId" class="normal-case font-normal ml-1 opacity-70">(Run {{ todoOverlay.runId }})</span>
+                 </div>
+
+                 <div v-if="todoOverlay && todoOverlay.items.length" class="space-y-1">
+                    <div 
+                      v-for="(item, idx) in todoOverlay.items" 
+                      :key="idx" 
+                      class="flex items-start gap-2 text-xs py-1"
+                      :class="item.completed ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-gray-200'"
+                    >
+                       <span class="material-symbols-rounded text-[14px]">{{ item.completed ? 'check_box' : 'check_box_outline_blank' }}</span>
+                       <span>{{ item.text }}</span>
+                    </div>
+                 </div>
+                 <div v-else class="text-xs text-gray-500 italic">
+                    No active todo list found in recent runs.
+                 </div>
               </div>
-            </div>
-            <div class="mt-1 truncate font-mono text-[10px] text-gray-500 dark:text-gray-400">
-              run: {{ todoOverlay?.runId }}
-            </div>
-          </div>
-
-          <button
-            class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            type="button"
-            aria-label="Dismiss TODO overlay"
-            @click="todoDismissedRunId = todoOverlay?.runId ?? null"
-          >
-            <span class="material-symbols-rounded text-[18px]">close</span>
-          </button>
-        </div>
-
-        <div class="mt-3 max-h-[240px] space-y-2 overflow-y-auto pr-1">
-          <div
-            v-for="(it, idx) in todoOverlay?.items ?? []"
-            :key="`${todoOverlay?.runId ?? 'run'}-${idx}`"
-            class="flex items-start gap-2 rounded-xl bg-gray-50 px-3 py-2 text-[12px] text-gray-800 dark:bg-gray-900 dark:text-gray-100"
-            :class="it.completed ? 'opacity-70' : ''"
-          >
-            <span class="material-symbols-rounded mt-0.5 text-[18px] text-gray-400">
-              {{ it.completed ? 'check_box' : 'check_box_outline_blank' }}
-            </span>
-            <div class="min-w-0 flex-1" :class="it.completed ? 'line-through' : ''">{{ it.text }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Config row -->
-      <div class="flex flex-wrap items-center gap-2">
-        <button
-          class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-colors"
-          :class="
-            mode === 'planning'
-              ? 'bg-brand-600 text-white shadow-brand-600/20'
-              : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
-          "
-          type="button"
-          @click="setMode('planning')"
-        >
-          <span class="material-symbols-rounded text-[18px]">chat</span>
-          Planning
-        </button>
-        <button
-          class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-colors"
-          :class="
-            mode === 'implementation'
-              ? 'bg-brand-600 text-white shadow-brand-600/20'
-              : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
-          "
-          type="button"
-          @click="setMode('implementation')"
-        >
-          <span class="material-symbols-rounded text-[18px]">build</span>
-          Implementation
-        </button>
-        <button
-          class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-colors"
-          :class="
-            mode === 'testing'
-              ? 'bg-brand-600 text-white shadow-brand-600/20'
-              : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
-          "
-          type="button"
-          @click="setMode('testing')"
-        >
-          <span class="material-symbols-rounded text-[18px]">checklist</span>
-          Testing
-        </button>
-
-        <div class="flex-1"></div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <select
-            v-model="dockTargetOverride"
-            class="rounded-xl bg-white px-3 py-2 text-xs font-black outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-            aria-label="Composer target"
-          >
-            <option value="current">Target: Current tab</option>
-            <option value="planning">Target: Planning</option>
-            <option value="implementation">Target: Implementation</option>
-            <option value="testing">Target: Testing</option>
-          </select>
-
-          <select
-            v-model="targetConfig.profileId"
-            class="rounded-xl bg-white px-3 py-2 text-xs font-black outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-            aria-label="Profile"
-          >
-            <option value="careful">Careful</option>
-            <option value="yolo">YOLO</option>
-          </select>
-
-          <select
-            v-model="targetConfig.modelChoice"
-            class="w-[220px] rounded-xl bg-white px-3 py-2 text-xs font-black outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-            aria-label="Model"
-            :disabled="modelsLoading"
-          >
-            <option value="default">Model: Default</option>
-            <option v-for="m in codexModels" :key="m.model" :value="m.model">
-              {{ m.displayName }}{{ m.isDefault ? ' (default)' : '' }}
-            </option>
-            <option value="custom">Model: Custom…</option>
-          </select>
-
-          <input
-            v-if="targetConfig.modelChoice === 'custom'"
-            v-model="targetConfig.modelCustom"
-            type="text"
-            placeholder="model id"
-            class="w-[220px] rounded-xl bg-white px-3 py-2 text-xs font-black outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-          />
-
-          <select
-            v-model="targetConfig.thinkingChoice"
-            class="rounded-xl bg-white px-3 py-2 text-xs font-black outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-950"
-            aria-label="Thinking level"
-          >
-            <option value="default">Thinking: Default</option>
-            <option value="minimal">Thinking: Minimal</option>
-            <option value="low">Thinking: Low</option>
-            <option value="medium">Thinking: Medium</option>
-            <option value="high">Thinking: High</option>
-            <option value="xhigh">Thinking: XHigh</option>
-          </select>
-
-          <label
-            v-if="targetConfig.profileId === 'careful'"
-            class="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 shadow-sm dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200"
-          >
-            <input v-model="targetConfig.oneShotNetwork" type="checkbox" class="h-4 w-4 accent-brand-600" />
-            One-shot tool network
-          </label>
-        </div>
-      </div>
-
-      <!-- Composer -->
-      <div class="mt-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950">
-        <div class="flex items-center justify-between gap-3">
-          <div class="text-xs font-black text-gray-700 dark:text-gray-200">
-            Composer
-            <span class="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-700 dark:bg-gray-900 dark:text-gray-200">
-              target: {{ targetMode }}
-            </span>
-          </div>
-          <button
-            class="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            type="button"
-            :aria-label="composerExpanded ? 'Collapse composer' : 'Expand composer'"
-            @click="composerExpanded = !composerExpanded"
-          >
-            <span class="material-symbols-rounded text-[20px]">{{ composerExpanded ? 'expand_more' : 'expand_less' }}</span>
-          </button>
-        </div>
-
-        <div class="mt-2">
-          <AutoGrowTextarea
-            v-model="composerText"
-            :min-rows="composerExpanded ? 4 : 2"
-            :max-rows="composerExpanded ? 20 : 4"
-            :max-viewport-fraction="0.25"
-            class="w-full rounded-xl bg-gray-100 px-3 py-2 text-sm outline-none ring-0 focus:ring-2 focus:ring-brand-500 dark:bg-gray-900"
-            placeholder="Message… (paste images here)"
-            :disabled="isRoleBusy(targetMode)"
-            @paste="onPasteComposer($event as ClipboardEvent)"
-          />
-
-          <AttachmentPreviews
-            v-if="extractWorkspaceImagePaths(composerText).length"
-            class="mt-2"
-            :workspace-path="workspacePath"
-            :attachments="extractWorkspaceImagePaths(composerText)"
-            :max="6"
-          />
-        </div>
-
-        <div class="mt-3 flex items-center justify-end gap-2">
-          <button
-            class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700 disabled:opacity-50"
-            type="button"
-            :disabled="!canSendComposer()"
-            @click="sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
-          >
-            <span class="material-symbols-rounded text-[18px]">send</span>
-            Send
-          </button>
+           </div>
         </div>
       </div>
     </div>
   </div>
-
+  
   <ToastHost :toasts="toasts" />
 </template>

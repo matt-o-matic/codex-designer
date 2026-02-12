@@ -32,17 +32,17 @@ watch(
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="flex h-full w-full flex-col space-y-4">
     <div
       v-if="error"
-      class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200"
+      class="shrink-0 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200"
     >
       {{ error }}
     </div>
 
     <div
       v-if="!activeWorkspace"
-      class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      class="mx-auto max-w-2xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
     >
       <div class="flex items-start gap-3">
         <span class="material-symbols-rounded text-[22px] text-brand-500">folder_open</span>
@@ -90,18 +90,35 @@ watch(
     </div>
 
     <div
-      v-else
-      class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      v-else-if="!selectedSessionSlug"
+      class="my-auto flex w-full flex-col items-center justify-center p-12 text-center"
+      style="background: linear-gradient(90deg, #0000 00%, #000 40%, #000 60%, #0000); max-height: 420px;"
     >
-      <div v-if="!selectedSessionSlug" class="rounded-xl bg-gray-50 p-4 text-sm dark:bg-gray-950">
-        <div class="font-bold">Select a session</div>
-        <p class="mt-1 text-gray-600 dark:text-gray-300">
-          Choose a feature session from the sidebar to view Planning / Implementation / Testing timelines.
+      <div class="space-y-2">
+        <h2 class="text-2xl font-black tracking-tight text-white shadow-black drop-shadow-md">Select a session</h2>
+        <p class="text-lg text-gray-200 shadow-black drop-shadow-sm">
+          Choose a feature or start something new.
         </p>
       </div>
-      <SessionWorkbench v-else :workspace-path="activeWorkspace.path" :feature-slug="selectedSessionSlug" />
+
+      <div class="mt-12 flex flex-col items-center">
+        <img src="/icon.png" alt="Codex Designer" class="h-48 w-48 drop-shadow-2xl transition-all duration-700 hover:scale-105" />
+        <div class="mt-4 font-mono text-xs font-bold tracking-[0.2em] text-gray-400">CODEX DESIGNER</div>
+      </div>
+    </div>
+
+    <!-- Ensure full height / proper layout for SessionWorkbench -->
+    <div
+      v-else
+      class="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
+    >
+      <SessionWorkbench
+        :workspace-path="activeWorkspace.path"
+        :feature-slug="selectedSessionSlug"
+      />
     </div>
   </div>
 
+  <!-- WorkspaceSheet handles its own visibility/modal -->
   <WorkspaceSheet />
 </template>

@@ -216,7 +216,7 @@ const showInputPrompt = computed(() => {
     <div class="px-4 pb-4">
       <div
         v-if="showUserMessage"
-        class="mb-3 rounded-xl border border-brand-200 bg-brand-50 p-3 dark:border-brand-900/40 dark:bg-brand-950/20"
+        class="mb-3 rounded-xl border border-brand-200 bg-brand-50 p-3 dark:border-brand-900/40 dark:bg-brand-900/20"
       >
         <div class="flex items-baseline justify-between gap-3">
           <div class="text-[10px] font-black uppercase tracking-widest text-brand-700 dark:text-brand-200">You</div>
@@ -231,35 +231,12 @@ const showInputPrompt = computed(() => {
           :max="6"
         />
 
-        <div class="mt-2 rounded-xl bg-white/70 p-3 dark:bg-gray-950/40">
+        <div class="mt-2 rounded-xl bg-white/70 p-3 dark:bg-gray-900/40">
           <MarkdownViewer :markdown="String(userMessage ?? '')" />
         </div>
       </div>
 
-      <div v-if="markdown.trim().length" class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
-        <div class="mb-2 flex items-baseline justify-between gap-3">
-          <div class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Codex</div>
-          <div class="text-[10px] font-semibold text-gray-500 dark:text-gray-400">{{ assistantLabel }}</div>
-        </div>
-        <MarkdownViewer :markdown="markdown" />
-      </div>
-      <div v-else class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
-        No final response yet.
-      </div>
-
-      <details
-        v-if="showInputPrompt"
-        class="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950"
-      >
-        <summary class="cursor-pointer select-none text-[10px] font-black uppercase tracking-widest text-gray-400">
-          Prompt
-        </summary>
-        <pre class="mt-3 whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-200">{{
-          String(inputPrompt ?? '')
-        }}</pre>
-      </details>
-
-      <details class="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950">
+      <details class="mb-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950" open>
         <summary class="cursor-pointer select-none text-[10px] font-black uppercase tracking-widest text-gray-400">
           Diagnostics
         </summary>
@@ -276,6 +253,17 @@ const showInputPrompt = computed(() => {
           />
         </div>
       </details>
+      
+      <div v-if="markdown.trim().length" class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
+        <div class="mb-2 flex items-baseline justify-between gap-3">
+          <div class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Codex</div>
+          <div class="text-[10px] font-semibold text-gray-500 dark:text-gray-400">{{ assistantLabel }}</div>
+        </div>
+        <MarkdownViewer :markdown="markdown" />
+      </div>
+      <div v-else class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
+        No final response yet.
+      </div>
     </div>
   </section>
 </template>

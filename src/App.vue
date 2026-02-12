@@ -159,7 +159,7 @@ watch(
           :nav-open="isDesktop ? desktopNavOpen : false"
           @toggle-nav="toggleNav"
         />
-        <main class="flex-1 overflow-y-auto p-3 sm:p-4">
+        <main class="flex-1 overflow-hidden bg-gray-50 p-3 dark:bg-gray-950 sm:p-4">
           <router-view />
         </main>
       </div>
