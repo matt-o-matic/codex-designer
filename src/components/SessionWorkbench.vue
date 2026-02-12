@@ -243,21 +243,20 @@ const draftSelected = ref<Record<string, string>>({})
 const draftNotes = ref<Record<string, string>>({})
 
 const qnaRounds = computed(() => qnaState.value?.rounds ?? [])
-const qnaComplete = computed(() => {
-  const rounds = qnaRounds.value
-  if (!rounds.length) return false
-  const last = rounds[rounds.length - 1]
-  return (last?.questions?.length ?? 0) === 0
-})
+	const qnaComplete = computed(() => {
+	  const rounds = qnaRounds.value
+	  if (!rounds.length) return false
+	  const last = rounds[rounds.length - 1]
+	  return (last?.questions?.length ?? 0) === 0
+	})
 
-const testPlan = ref<TestPlan | null>(null)
-const testLoadError = ref<string | null>(null)
-const testMarkdown = computed(() => (testPlan.value ? renderTestMarkdown(testPlan.value) : ''))
+	const testPlan = ref<TestPlan | null>(null)
+	const testLoadError = ref<string | null>(null)
 
-// NOTE: This must be defined before the immediate watch() that calls loadRunLogs(),
-// otherwise we'll hit the temporal-dead-zone for this ref.
-const runLogsLoading = ref(false)
-const runLogsById = ref<Record<string, { meta: any; events: unknown[] }>>({})
+	// NOTE: This must be defined before the immediate watch() that calls loadRunLogs(),
+	// otherwise we'll hit the temporal-dead-zone for this ref.
+	const runLogsLoading = ref(false)
+	const runLogsById = ref<Record<string, { meta: any; events: unknown[] }>>({})
 
 const houseStyleMarkdown = ref('')
 
@@ -1267,26 +1266,19 @@ const todoOverlay = computed<TodoOverlayState | null>(() => {
   return null
 })
 
-watch(
-  () => todoOverlay.value?.runId ?? null,
-  (next) => {
-    if (!next) return
-    if (todoDismissedRunId.value === next) return
-    todoDismissedRunId.value = null
-  }
-)
+	watch(
+	  () => todoOverlay.value?.runId ?? null,
+	  (next) => {
+	    if (!next) return
+	    if (todoDismissedRunId.value === next) return
+	    todoDismissedRunId.value = null
+	  }
+	)
 
-const showTodoOverlay = computed(() => {
-  const overlay = todoOverlay.value
-  if (!overlay) return false
-  if (todoDismissedRunId.value && todoDismissedRunId.value === overlay.runId) return false
-  return overlay.total > 0
-})
-
-function runTitle(r: RunCardRecord): string {
-  if (r.uiAction) return r.uiAction
-  return `${r.role ?? 'run'}`
-}
+	function runTitle(r: RunCardRecord): string {
+	  if (r.uiAction) return r.uiAction
+	  return `${r.role ?? 'run'}`
+	}
 
 function abort(runId: string) {
   void abortRun(runId).catch((e) => showToast(e instanceof Error ? e.message : String(e)))
@@ -1656,11 +1648,12 @@ onMounted(() => {
                                   <span class="font-bold mr-1">{{ opt.key }}</span> {{ opt.text }}
                                 </button>
                               </div>
-                              <AutoGrowTextarea
-                                v-model="draftNotes[q.id]"
-                                class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
-                                placeholder="Notes..."
-                              />
+	                              <AutoGrowTextarea
+	                                v-model="draftNotes[q.id]"
+	                                class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
+	                                placeholder="Notes..."
+	                                @paste="onPasteQnaNotes($event as ClipboardEvent, q)"
+	                              />
                               <button 
                                 class="w-full py-1 bg-brand-600 text-white rounded text-[10px] font-bold"
                                 @click="saveQnaAnswer(q)"

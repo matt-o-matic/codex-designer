@@ -6,7 +6,7 @@ import { useRunStore } from '../lib/runStore'
 import { useWorkbenchUi } from '../lib/workbenchUi'
 import { parseLenientJson } from '../lib/json'
 import { buildPlanningCreatePrompt } from '../lib/prompts'
-import { normalizeQnaStateV1, renderQnaMarkdownFromState, type QnaStateV1 } from '../lib/qnaState'
+import { createEmptyQnaStateV1, normalizeQnaStateV1, renderQnaMarkdownFromState, type QnaStateV1 } from '../lib/qnaState'
 
 const { openWorkspace } = useAppState()
 const { selectSession, setWorkspaceExpanded } = useWorkbenchUi()
@@ -145,18 +145,13 @@ async function createFeature() {
   submitError.value = null
   submitRunId.value = null
 
-  try {
-    const briefText = String(brief.value ?? '').trim()
+	try {
+	  const briefText = String(brief.value ?? '').trim()
 
-    // 1. Create stub artifacts immediately
-    const stubQnaState: QnaStateV1 = {
-      version: 1,
-      featureSlug: nextSlug,
-      updatedAt: new Date().toISOString(),
-      rounds: [],
-    }
-    const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
-    const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
+	  // 1. Create stub artifacts immediately
+	  const stubQnaState: QnaStateV1 = createEmptyQnaStateV1(nextSlug)
+	  const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
+	  const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
 
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(stubQnaState, null, 2) + '\n')
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.md`, stubQnaMd)

@@ -176,13 +176,6 @@ const showUserMessage = computed(() => String(props.userMessage ?? '').trim().le
 const showUserAttachments = computed(
   () => !!props.workspacePath && Array.isArray(props.userAttachments) && props.userAttachments.length > 0
 )
-const showInputPrompt = computed(() => {
-  if (!showUserMessage.value) return false
-  const raw = String(props.inputPrompt ?? '').trim()
-  if (!raw.length) return false
-  const user = String(props.userMessage ?? '').trim()
-  return !user.length || raw !== user
-})
 </script>
 
 <template>
