@@ -16,19 +16,22 @@
     "appId": "com.codex.designer",
     "productName": "Codex Designer",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "asarUnpack": [
       "**/node_modules/@openai/codex-sdk/vendor/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "zip"
@@ -36,6 +39,7 @@
     },
     "linux": {
       "category": "Development",
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "tar.gz"

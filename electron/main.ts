@@ -124,14 +124,23 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 let mainWindow: BrowserWindow | null = null
 
+function resolveRendererIconPath(): string | null {
+  const base = String(process.env.VITE_PUBLIC || '').trim()
+  if (!base) return null
+  const iconPath = path.join(base, 'icon.png')
+  return existsSync(iconPath) ? iconPath : null
+}
+
 function createMainWindow() {
   const isDev = Boolean(VITE_DEV_SERVER_URL)
+  const iconPath = resolveRendererIconPath()
 
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 980,
     minHeight: 680,
+    icon: iconPath ?? undefined,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#030712' : '#ffffff',
     title: 'codex-designer',
     webPreferences: {
@@ -189,6 +198,15 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  const iconPath = resolveRendererIconPath()
+  if (iconPath && process.platform === 'darwin') {
+    try {
+      app.dock?.setIcon(iconPath)
+    } catch {
+      // ignore
+    }
+  }
+
   createMainWindow()
 
   app.on('browser-window-created', (_, win) => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import logoUrl from '../assets/logo.png'
 
 const props = defineProps<{
   canOpenNav?: boolean
@@ -39,9 +40,11 @@ function toggleTheme() {
 
       <div class="min-w-0">
         <div class="flex items-center gap-2">
-          <span class="material-symbols-rounded text-brand-600 dark:text-brand-400"
-            >auto_awesome</span
+          <span
+            class="flex h-7 w-7 items-center justify-center rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-800 dark:bg-gray-900"
           >
+            <img :src="logoUrl" alt="" class="h-full w-full object-contain" />
+          </span>
           <h1 class="truncate text-sm font-black tracking-tight">codex-designer</h1>
         </div>
         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
