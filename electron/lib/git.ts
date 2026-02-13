@@ -63,6 +63,16 @@ export async function gitDiffStat(workdir: string, range: string): Promise<strin
   return stdout.trim()
 }
 
+export async function gitDiffNumStat(workdir: string, opts?: { ref?: string; cached?: boolean; paths?: string[] }): Promise<string> {
+  const args = ['diff', '--numstat']
+  if (opts?.cached) args.push('--cached')
+  if (opts?.ref) args.push(String(opts.ref))
+  const paths = (opts?.paths ?? []).map((p) => String(p ?? '').trim()).filter(Boolean)
+  if (paths.length) args.push('--', ...paths)
+  const { stdout } = await execFileAsync('git', args, { cwd: workdir, maxBuffer: 1024 * 1024 })
+  return stdout.trim()
+}
+
 export async function gitCommitAll(
   workdir: string,
   message: string

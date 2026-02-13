@@ -11,6 +11,20 @@ export type RunUsage = {
   totalTokens: number
 }
 
+export type WorkspaceDiffFile = {
+  path: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'unknown'
+  additions: number | null
+  deletions: number | null
+}
+
+export type WorkspaceDiffSummary = {
+  isGitRepo: boolean
+  updatedAtMs: number
+  files: WorkspaceDiffFile[]
+  error: string | null
+}
+
 export type RunRecord = {
   runId: string
   workspacePath: string | null
@@ -36,6 +50,7 @@ export type RunRecord = {
   oneShotNetwork: boolean | null
   uiAction: string | null
   uiUserMessage: string | null
+  workspaceDiff: WorkspaceDiffSummary | null
 }
 
 const runs = reactive<Record<string, RunRecord>>({})
@@ -44,6 +59,74 @@ let subscribed = false
 let unsubscribe: (() => void) | null = null
 
 const MAX_EVENTS = 100
+
+type DiffRefreshState = {
+  timer: ReturnType<typeof setTimeout> | null
+  inFlight: boolean
+  pending: boolean
+  missingHandlerRetries: number
+}
+
+const diffRefreshByRun = new Map<string, DiffRefreshState>()
+
+function getDiffRefreshState(runId: string): DiffRefreshState {
+  const existing = diffRefreshByRun.get(runId)
+  if (existing) return existing
+  const next: DiffRefreshState = { timer: null, inFlight: false, pending: false, missingHandlerRetries: 0 }
+  diffRefreshByRun.set(runId, next)
+  return next
+}
+
+function scheduleWorkspaceDiffRefresh(runId: string, delayMs = 650) {
+  const api = window.codexDesigner
+  if (!api?.getGitWorktreeSummary) return
+  const rec = runs[runId]
+  if (!rec?.workspacePath) return
+
+  const st = getDiffRefreshState(runId)
+  st.pending = true
+  if (st.timer) return
+
+  st.timer = setTimeout(async () => {
+    st.timer = null
+    if (st.inFlight) return
+
+    st.inFlight = true
+    st.pending = false
+    try {
+      const res = await api.getGitWorktreeSummary(rec.workspacePath!)
+      if (!runs[runId]) return
+      st.missingHandlerRetries = 0
+      runs[runId].workspaceDiff = {
+        isGitRepo: !!res?.isGitRepo,
+        updatedAtMs: Number(res?.updatedAtMs) || Date.now(),
+        files: Array.isArray(res?.files) ? (res.files as any) : [],
+        error: typeof res?.error === 'string' || res?.error === null ? (res.error as any) : null,
+      }
+    } catch (e) {
+      if (!runs[runId]) return
+      const msg = e instanceof Error ? e.message : String(e)
+      const missingHandler =
+        msg.includes("No handler registered for 'codex-designer:get-git-worktree-summary'") ||
+        (msg.includes('No handler registered') && msg.includes('get-git-worktree-summary'))
+
+      if (missingHandler && st.missingHandlerRetries < 3) {
+        st.missingHandlerRetries += 1
+        scheduleWorkspaceDiffRefresh(runId, 1250)
+      }
+
+      runs[runId].workspaceDiff = {
+        isGitRepo: false,
+        updatedAtMs: Date.now(),
+        files: [],
+        error: missingHandler ? 'Diff stats unavailable (restart the app to enable this).' : msg,
+      }
+    } finally {
+      st.inFlight = false
+      if (st.pending) scheduleWorkspaceDiffRefresh(runId, 250)
+    }
+  }, Math.max(0, Math.floor(delayMs)))
+}
 
 function ensureSubscribed() {
   if (subscribed) return
@@ -77,6 +160,7 @@ function ensureSubscribed() {
           oneShotNetwork: null,
           uiAction: null,
           uiUserMessage: null,
+          workspaceDiff: null,
         }
       }
 
@@ -86,6 +170,22 @@ function ensureSubscribed() {
       }
 
       const evt = payload.event as any
+      if (
+        (evt?.type === 'item.started' || evt?.type === 'item.updated' || evt?.type === 'item.completed') &&
+        evt?.item &&
+        typeof evt.item === 'object'
+      ) {
+        const itemType = typeof evt.item.type === 'string' ? evt.item.type : ''
+
+        if (itemType === 'agent_message' && typeof evt.item.text === 'string') {
+          runs[runId].finalResponse = evt.item.text
+        }
+
+        if (itemType === 'file_change' || (itemType === 'command_execution' && evt.type === 'item.completed')) {
+          scheduleWorkspaceDiffRefresh(runId)
+        }
+      }
+
       if (evt?.type === 'run.result' && typeof evt.finalResponse === 'string') {
         runs[runId].finalResponse = evt.finalResponse
       } else if (evt?.type === 'run.started') {
@@ -134,12 +234,15 @@ function ensureSubscribed() {
         runs[runId].status = 'failed'
         runs[runId].error = evt.message ? String(evt.message) : 'Run failed'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
+        scheduleWorkspaceDiffRefresh(runId, 0)
       } else if (evt?.type === 'run.aborted') {
         runs[runId].status = 'aborted'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
+        scheduleWorkspaceDiffRefresh(runId, 0)
       } else if (evt?.type === 'run.completed') {
         if (runs[runId].status === 'running') runs[runId].status = 'completed'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
+        scheduleWorkspaceDiffRefresh(runId, 0)
       }
     }) ?? null
 }
@@ -221,6 +324,7 @@ export function useRunStore() {
       oneShotNetwork: args.oneShotNetwork === true,
       uiAction: args.uiAction ?? null,
       uiUserMessage: args.uiUserMessage ?? null,
+      workspaceDiff: null,
     }
     return runId
   }

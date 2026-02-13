@@ -198,6 +198,9 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  // Register IPC before creating the window so the renderer can invoke APIs immediately.
+  registerIpcHandlers()
+
   const iconPath = resolveRendererIconPath()
   if (iconPath && process.platform === 'darwin') {
     try {
@@ -212,9 +215,4 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, win) => {
     win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#030712' : '#ffffff')
   })
-})
-
-// IPC
-app.whenReady().then(() => {
-  registerIpcHandlers()
 })

@@ -4,6 +4,7 @@ import MarkdownViewer from '../MarkdownViewer.vue'
 import RunEventStream from '../RunEventStream.vue'
 import AttachmentPreviews from '../AttachmentPreviews.vue'
 import { parseLenientJson } from '../../lib/json'
+import type { WorkspaceDiffSummary } from '../../lib/runStore'
 import {
   createEmptyQnaStateV1,
   normalizeQnaStateV1,
@@ -40,6 +41,7 @@ const props = defineProps<{
   meta?: RunMeta
   collapseKey?: string
   canStop?: boolean
+  workspaceDiff?: WorkspaceDiffSummary | null
 }>()
 
 const emit = defineEmits<{
@@ -176,6 +178,30 @@ const showUserMessage = computed(() => String(props.userMessage ?? '').trim().le
 const showUserAttachments = computed(
   () => !!props.workspacePath && Array.isArray(props.userAttachments) && props.userAttachments.length > 0
 )
+
+const diffUpdatedLabel = computed(() => {
+  const t = props.workspaceDiff?.updatedAtMs
+  return typeof t === 'number' && Number.isFinite(t) ? formatTimestamp(t) : ''
+})
+
+function diffStatusLabel(status: WorkspaceDiffSummary['files'][number]['status']): string {
+  if (status === 'added') return 'A'
+  if (status === 'deleted') return 'D'
+  if (status === 'renamed') return 'R'
+  if (status === 'copied') return 'C'
+  if (status === 'untracked') return '??'
+  if (status === 'modified') return 'M'
+  return '?'
+}
+
+function diffStatusClass(status: WorkspaceDiffSummary['files'][number]['status']): string {
+  if (status === 'added') return 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-200'
+  if (status === 'deleted') return 'bg-rose-600/10 text-rose-700 dark:text-rose-200'
+  if (status === 'renamed' || status === 'copied') return 'bg-brand-600/10 text-brand-700 dark:text-brand-200'
+  if (status === 'untracked') return 'bg-amber-600/10 text-amber-700 dark:text-amber-200'
+  if (status === 'modified') return 'bg-gray-500/10 text-gray-700 dark:text-gray-200'
+  return 'bg-gray-500/10 text-gray-700 dark:text-gray-200'
+}
 </script>
 
 <template>
@@ -256,6 +282,41 @@ const showUserAttachments = computed(
       </div>
       <div v-else class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
         No final response yet.
+      </div>
+
+      <div
+        v-if="workspaceDiff && (workspaceDiff.error || workspaceDiff.files.length)"
+        class="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950"
+      >
+        <div class="flex items-baseline justify-between gap-3">
+          <div class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Edited files</div>
+          <div v-if="diffUpdatedLabel" class="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+            updated {{ diffUpdatedLabel }}
+          </div>
+        </div>
+
+        <div v-if="workspaceDiff.error" class="mt-2 text-xs text-rose-700 dark:text-rose-200">
+          {{ workspaceDiff.error }}
+        </div>
+
+        <div v-else class="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1">
+          <div
+            v-for="f in workspaceDiff.files"
+            :key="f.path"
+            class="flex items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5 text-xs dark:border-gray-800 dark:bg-gray-900"
+          >
+            <div class="min-w-0 truncate font-mono text-[11px] text-gray-700 dark:text-gray-200">
+              {{ f.path }}
+            </div>
+            <div class="flex flex-none items-center gap-2 font-mono text-[11px]">
+              <span class="rounded-full px-2 py-0.5 font-black" :class="diffStatusClass(f.status)">
+                {{ diffStatusLabel(f.status) }}
+              </span>
+              <span class="text-emerald-700 dark:text-emerald-200">+{{ f.additions ?? '—' }}</span>
+              <span class="text-rose-700 dark:text-rose-200">-{{ f.deletions ?? '—' }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>

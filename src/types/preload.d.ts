@@ -141,6 +141,17 @@ declare global {
       }): Promise<{ relPath: string }>
       readAttachmentDataUrl(workspacePath: string, relPath: string): Promise<string>
       deleteAttachment(workspacePath: string, relPath: string): Promise<boolean>
+      getGitWorktreeSummary(workspacePath: string): Promise<{
+        isGitRepo: boolean
+        updatedAtMs: number
+        files: Array<{
+          path: string
+          status: 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'unknown'
+          additions: number | null
+          deletions: number | null
+        }>
+        error: string | null
+      }>
       getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string>
       getGitDiff(workspacePath: string, fromCommit: string): Promise<string>
       gitCommitAll(

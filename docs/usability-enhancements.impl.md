@@ -89,6 +89,21 @@ Commands run:
 - `export PATH=/tmp/codex-node/node-v22.11.0-darwin-arm64/bin:$PATH && npm run typecheck` → OK.
 - `export PATH=/tmp/codex-node/node-v22.11.0-darwin-arm64/bin:$PATH && npm run build` → OK.
 
+### 2026-02-13
+Requested UX improvement: show which files changed during runs (with basic diff stats), appended to the end of the run card (and updating live while a run is streaming).
+
+Implemented:
+- Added a Git worktree summary IPC (`codex-designer:get-git-worktree-summary`) returning per-file status + `+adds/-dels` (best-effort; untracked files get approximate `+lines` when small text).
+- Run store now refreshes the worktree summary when files change / commands complete, and once more at run end.
+- Run cards render an “Edited files” section after the final response markdown.
+- Run cards now stream `finalResponse` live from `agent_message` item updates (previously could appear only at completion, depending on event ordering).
+- IPC handlers are registered before the main window is created (avoids “No handler registered” races during dev reloads); the renderer also retries briefly if the handler isn’t ready yet.
+
+Commands run:
+- `npm run typecheck` → OK.
+- `npm run build` → OK.
+- `npm run pack` → OK.
+
 ### 2026-02-04 (follow-up 9)
 Request: show an explicit TODO overlay when Codex emits `todo_list` items; place it bottom-right above the input dock.
 

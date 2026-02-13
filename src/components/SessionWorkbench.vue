@@ -1203,6 +1203,7 @@ type RunCardRecord = {
   uiUserMessage: string | null
   input: string | null
   inputImages: string[]
+  workspaceDiff: RunRecord['workspaceDiff']
   meta: {
     profileId: string | null
     model: string | null
@@ -1233,6 +1234,7 @@ const mergedRuns = computed<RunCardRecord[]>(() => {
       uiUserMessage: r.uiUserMessage ?? null,
       input: r.input ?? null,
       inputImages: r.inputImages ?? [],
+      workspaceDiff: r.workspaceDiff ?? null,
       meta: {
         profileId: r.profileId,
         model: r.model,
@@ -1269,6 +1271,7 @@ const mergedRuns = computed<RunCardRecord[]>(() => {
       uiUserMessage,
       input,
       inputImages,
+      workspaceDiff: null,
       meta: {
         profileId: meta.profileId ?? null,
         model: meta.model ?? null,
@@ -1555,6 +1558,7 @@ onMounted(() => {
                   :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
                   :input-prompt="r.input ?? ''"
                   :final-response="r.finalResponse"
+                  :workspace-diff="r.workspaceDiff"
                   :events="r.events"
                   :meta="r.meta"
                   :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
@@ -1581,6 +1585,7 @@ onMounted(() => {
                   :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
                   :input-prompt="r.input ?? ''"
                   :final-response="r.finalResponse"
+                  :workspace-diff="r.workspaceDiff"
                   :events="r.events"
                   :meta="r.meta"
                   :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"
@@ -1607,6 +1612,7 @@ onMounted(() => {
                   :user-attachments="extractWorkspaceImagePaths(r.uiUserMessage ?? '')"
                   :input-prompt="r.input ?? ''"
                   :final-response="r.finalResponse"
+                  :workspace-diff="r.workspaceDiff"
                   :events="r.events"
                   :meta="r.meta"
                   :collapse-key="`codex-designer:run-stream:${featureSlug}:${r.runId}`"

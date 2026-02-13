@@ -8,6 +8,7 @@ import {
   gitCommitAll,
   gitCreateBranch,
   gitDiff,
+  gitDiffNumStat,
   gitDiffStat,
   gitFetch,
   gitHeadCommit,
@@ -93,6 +94,106 @@ export type WorkspaceSummary = {
   headCommit: string | null
   shareability: WorkspaceShareability | null
   features: Awaited<ReturnType<typeof listFeatures>>
+}
+
+type GitWorktreeDiffStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'unknown'
+
+type GitWorktreeDiffFile = {
+  path: string
+  status: GitWorktreeDiffStatus
+  additions: number | null
+  deletions: number | null
+}
+
+type GitWorktreeDiffSummary = {
+  isGitRepo: boolean
+  updatedAtMs: number
+  files: GitWorktreeDiffFile[]
+  error: string | null
+}
+
+function parseGitNumStat(raw: string): Array<{ path: string; additions: number | null; deletions: number | null }> {
+  const out: Array<{ path: string; additions: number | null; deletions: number | null }> = []
+  const lines = String(raw ?? '')
+    .split(/\r?\n/g)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length)
+  for (const line of lines) {
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    const aRaw = parts[0]
+    const dRaw = parts[1]
+    const p = parts.slice(2).join('\t').trim()
+    if (!p.length) continue
+
+    const additions = aRaw === '-' ? null : Number.parseInt(aRaw, 10)
+    const deletions = dRaw === '-' ? null : Number.parseInt(dRaw, 10)
+    out.push({
+      path: p,
+      additions: Number.isFinite(additions) ? additions : null,
+      deletions: Number.isFinite(deletions) ? deletions : null,
+    })
+  }
+  return out
+}
+
+function kindFromPorcelain(xy: string): GitWorktreeDiffStatus {
+  const s = String(xy ?? '')
+  if (s.includes('R')) return 'renamed'
+  if (s.includes('C')) return 'copied'
+  if (s.includes('A')) return 'added'
+  if (s.includes('D')) return 'deleted'
+  if (s.includes('M')) return 'modified'
+  return 'unknown'
+}
+
+function parseGitStatusPorcelain(raw: string): Map<string, GitWorktreeDiffStatus> {
+  const out = new Map<string, GitWorktreeDiffStatus>()
+  const lines = String(raw ?? '')
+    .split(/\r?\n/g)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length)
+
+  for (const line of lines) {
+    if (line.startsWith('?? ')) {
+      const p = line.slice(3).trim()
+      if (p.length) out.set(p, 'untracked')
+      continue
+    }
+
+    if (line.length < 4) continue
+    const xy = line.slice(0, 2)
+    let p = line.slice(3).trim()
+    if (!p.length) continue
+
+    const arrow = p.indexOf(' -> ')
+    if (arrow !== -1) {
+      p = p.slice(arrow + 4).trim()
+    }
+    if (!p.length) continue
+
+    out.set(p, kindFromPorcelain(xy))
+  }
+
+  return out
+}
+
+async function estimateTextLineCount(absPath: string): Promise<number | null> {
+  try {
+    const st = await fs.stat(absPath).catch(() => null)
+    if (!st || !st.isFile()) return null
+    if (st.size > 2 * 1024 * 1024) return null
+    const buf = await fs.readFile(absPath)
+    if (!buf.length) return 0
+    // If the file looks binary, don't guess line counts.
+    if (buf.includes(0)) return null
+    let lines = 0
+    for (const b of buf) if (b === 10) lines++
+    if (buf[buf.length - 1] !== 10) lines++
+    return lines
+  } catch {
+    return null
+  }
 }
 
 export function registerIpcHandlers() {
@@ -545,6 +646,74 @@ export function registerIpcHandlers() {
       if (st.isDirectory()) throw new Error('Refusing to delete a directory.')
       await fs.rm(abs, { force: true })
       return true
+    }
+  )
+
+  ipcMain.handle(
+    'codex-designer:get-git-worktree-summary',
+    async (_event, args: { workspacePath: string }): Promise<GitWorktreeDiffSummary> => {
+      const workspacePath = String(args.workspacePath ?? '').trim()
+      const updatedAtMs = Date.now()
+      if (!workspacePath.length) {
+        return { isGitRepo: false, updatedAtMs, files: [], error: 'Missing workspace path.' }
+      }
+
+      const gitRepo = await isGitRepo(workspacePath)
+      if (!gitRepo) {
+        return { isGitRepo: false, updatedAtMs, files: [], error: 'Workspace is not a git repo.' }
+      }
+
+      let hasHead = false
+      try {
+        await gitHeadCommit(workspacePath)
+        hasHead = true
+      } catch {
+        hasHead = false
+      }
+
+      const [statusRaw, diffRaw] = await Promise.all([
+        gitStatusPorcelain(workspacePath).catch(() => ''),
+        hasHead
+          ? gitDiffNumStat(workspacePath, { ref: 'HEAD' }).catch(() => '')
+          : Promise.all([
+              gitDiffNumStat(workspacePath, { cached: true }).catch(() => ''),
+              gitDiffNumStat(workspacePath, {}).catch(() => ''),
+            ]).then((parts) => parts.filter((p) => p.trim().length).join('\n')),
+      ])
+
+      const statusByPath = parseGitStatusPorcelain(statusRaw)
+      const rows = parseGitNumStat(diffRaw)
+
+      const filesByPath = new Map<string, GitWorktreeDiffFile>()
+      for (const r of rows) {
+        filesByPath.set(r.path, {
+          path: r.path,
+          status: statusByPath.get(r.path) ?? 'modified',
+          additions: r.additions,
+          deletions: r.deletions,
+        })
+      }
+
+      for (const [p, status] of statusByPath.entries()) {
+        if (filesByPath.has(p)) {
+          const existing = filesByPath.get(p)!
+          if (existing.status === 'unknown') existing.status = status
+          continue
+        }
+
+        let additions: number | null = null
+        let deletions: number | null = null
+        if (status === 'untracked') {
+          const abs = resolveInside(workspacePath, p)
+          additions = await estimateTextLineCount(abs)
+          deletions = 0
+        }
+
+        filesByPath.set(p, { path: p, status, additions, deletions })
+      }
+
+      const files = Array.from(filesByPath.values()).sort((a, b) => a.path.localeCompare(b.path))
+      return { isGitRepo: true, updatedAtMs, files, error: null }
     }
   )
 

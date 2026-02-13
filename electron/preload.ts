@@ -68,6 +68,22 @@ type CodexModelInfo = {
 
 type GitCommandResult = { stdout: string; stderr: string; exitCode: number }
 
+type GitWorktreeDiffStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'unknown'
+
+type GitWorktreeDiffFile = {
+  path: string
+  status: GitWorktreeDiffStatus
+  additions: number | null
+  deletions: number | null
+}
+
+type GitWorktreeDiffSummary = {
+  isGitRepo: boolean
+  updatedAtMs: number
+  files: GitWorktreeDiffFile[]
+  error: string | null
+}
+
 const api = {
   setWindowTitle(title: string): Promise<boolean> {
     return ipcRenderer.invoke('codex-designer:set-window-title', title)
@@ -138,6 +154,9 @@ const api = {
   },
   deleteAttachment(workspacePath: string, relPath: string): Promise<boolean> {
     return ipcRenderer.invoke('codex-designer:delete-attachment', { workspacePath, relPath })
+  },
+  getGitWorktreeSummary(workspacePath: string): Promise<GitWorktreeDiffSummary> {
+    return ipcRenderer.invoke('codex-designer:get-git-worktree-summary', { workspacePath })
   },
   getGitDiffStat(workspacePath: string, fromCommit: string): Promise<string> {
     return ipcRenderer.invoke('codex-designer:get-git-diff-stat', { workspacePath, fromCommit })
