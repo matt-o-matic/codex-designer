@@ -73,7 +73,8 @@ const configs = ref<Record<SessionMode, ModeConfig>>({
 const dockTargetOverride = ref<'current' | SessionMode>('current')
 const targetMode = computed<SessionMode>(() => (dockTargetOverride.value === 'current' ? mode.value : dockTargetOverride.value))
 const targetConfig = computed(() => configs.value[targetMode.value])
-const activeDocumentTab = ref<'plan' | 'qna' | 'tests' | 'todos'>('plan')
+const activeDocumentTab = ref<'plan' | 'qna' | 'tests'>('plan')
+const showTodos = ref(false)
 
 /* -------------------------------------------------------------------------
    Scroll Management (Chat / Left Pane)
@@ -902,6 +903,18 @@ async function sendComposer() {
   composerExpanded.value = false
 }
 
+function onKeydownComposer(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    const isMod = e.metaKey || e.ctrlKey
+    if (isMod) {
+      if (!isRoleBusy(targetMode.value) && canSendComposer()) {
+        e.preventDefault()
+        sendComposer().catch((err) => showToast(err instanceof Error ? err.message : String(err)))
+      }
+    }
+  }
+}
+
 // --- Pasted images (composer + Q&A) ---
 function findImageFile(dt: DataTransfer): File | null {
   const candidates: File[] = []
@@ -1060,17 +1073,56 @@ async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string)
 async function onPasteComposer(e: ClipboardEvent) {
   await attachPastedImage(e, (rel) => {
     const md = `![pasted image](${rel})`
-    composerText.value = composerText.value.trim().length ? `${composerText.value}\n\n${md}` : md
+    // Use the same cursor-aware logic as text paste
+    const el = e.target as HTMLTextAreaElement
+    const start = el.selectionStart ?? composerText.value.length
+    const end = el.selectionEnd ?? composerText.value.length
+    const existing = composerText.value
+    const next = existing.slice(0, start) + md + existing.slice(end)
+    composerText.value = next
+
+    // Adjust caret after next tick
+    nextTick(() => {
+      const caret = start + md.length
+      el.selectionStart = caret
+      el.selectionEnd = caret
+      el.focus()
+    })
   })
 }
 
 async function onPasteQnaNotes(e: ClipboardEvent, q: QnaQuestionV1) {
   if (qnaLocked.value) return
   await attachPastedImage(e, (rel) => {
-    const md = `![pasted image](${rel})`
     qnaEditOpen.value = { ...qnaEditOpen.value, [q.id]: true }
+    
+    const el = e.target as HTMLTextAreaElement
+    const start = el?.selectionStart ?? (draftNotes.value[q.id] ?? '').length
+    const end = el?.selectionEnd ?? (draftNotes.value[q.id] ?? '').length
     const existing = String(draftNotes.value[q.id] ?? '')
-    draftNotes.value = { ...draftNotes.value, [q.id]: existing.trim().length ? `${existing}\n\n${md}` : md }
+    const md = `![pasted image](${rel})`
+    const next = existing.slice(0, start) + md + existing.slice(end)
+    
+    draftNotes.value = { ...draftNotes.value, [q.id]: next }
+
+    if (el) {
+      nextTick(() => {
+        const caret = start + md.length
+        el.selectionStart = caret
+        el.selectionEnd = caret
+        el.focus()
+      })
+    }
+  })
+}
+
+async function onPasteTestFeedback(e: ClipboardEvent, round: TestRound, testId: string) {
+  await attachPastedImage(e, async (rel) => {
+    const res = getResult(round, testId)
+    if (!res.feedback[0].attachments.includes(rel)) {
+      res.feedback[0].attachments.push(rel)
+    }
+    await saveTestPlan()
   })
 }
 
@@ -1261,7 +1313,14 @@ watch(
 )
 
 type TodoOverlayItem = { text: string; completed: boolean }
-type TodoOverlayState = { runId: string; role: SessionMode | null; items: TodoOverlayItem[]; done: number; total: number }
+type TodoOverlayState = { 
+  runId: string
+  role: SessionMode | null
+  items: TodoOverlayItem[]
+  done: number
+  total: number
+  status: string 
+}
 
 function extractLatestTodoList(events: unknown[]): TodoOverlayItem[] | null {
   for (let i = (events ?? []).length - 1; i >= 0; i--) {
@@ -1280,35 +1339,94 @@ function extractLatestTodoList(events: unknown[]): TodoOverlayItem[] | null {
 }
 
 const todoDismissedRunId = ref<string | null>(null)
+const todoPosition = ref({ x: 0, y: 0 })
+const isDraggingTodo = ref(false)
+
+function startDraggingTodo(e: MouseEvent) {
+  isDraggingTodo.value = true
+  const startX = e.clientX - todoPosition.value.x
+  const startY = e.clientY - todoPosition.value.y
+
+  const onMouseMove = (ev: MouseEvent) => {
+    todoPosition.value = {
+      x: ev.clientX - startX,
+      y: ev.clientY - startY,
+    }
+  }
+
+  const onMouseUp = () => {
+    isDraggingTodo.value = false
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
 
 const todoOverlay = computed<TodoOverlayState | null>(() => {
-  const running = mergedRuns.value.filter((r) => r.status === 'running')
-  if (!running.length) return null
-
-  const target = targetMode.value
-  const preferred = running
-    .filter((r) => r.role === target)
-    .sort((a, b) => b.startedAt - a.startedAt)
-  const fallback = running.sort((a, b) => b.startedAt - a.startedAt)
-
-  const candidates = preferred.length ? preferred : fallback
+  // Sort runs by startedAt descending to get the most recent ones first
+  const candidates = [...mergedRuns.value].sort((a, b) => b.startedAt - a.startedAt)
+  
+  // Try to find the latest run that has a todo list
   for (const r of candidates) {
     const list = extractLatestTodoList(r.events)
-    if (!list) continue
+    if (!list || list.length === 0) continue
+    
     const done = list.filter((i) => i.completed).length
-    return { runId: r.runId, role: (r.role as any) ?? null, items: list, done, total: list.length }
+    return { 
+      runId: r.runId, 
+      role: (r.role as any) ?? null, 
+      items: list, 
+      done, 
+      total: list.length,
+      status: r.status
+    }
   }
   return null
 })
 
+// Watcher to handle auto-showing and auto-hiding the todo list
+watch(
+  todoOverlay,
+  (val, oldVal) => {
+    if (!val) {
+      showTodos.value = false
+      return
+    }
+
+    // Auto-show when a NEW run with todos starts
+    if (val.status === 'running' && val.runId !== todoDismissedRunId.value) {
+      showTodos.value = true
+    }
+
+    // Auto-hide when the current run transitions out of "running"
+    if (oldVal && oldVal.runId === val.runId && oldVal.status === 'running' && val.status !== 'running') {
+      showTodos.value = false
+    }
+  },
+  { immediate: true }
+)
+
 watch(
   () => todoOverlay.value?.runId ?? null,
-  (next) => {
-    if (!next) return
-    if (todoDismissedRunId.value === next) return
-    todoDismissedRunId.value = null
+  (next, prev) => {
+    if (next !== prev) {
+      // If the run changed, we reset the dismissal state (unless it's null)
+      if (next) {
+        // We don't necessarily clear it immediately if it's the same run
+        // but if it's a NEW run, we want it to be able to pop up again.
+      }
+    }
   }
 )
+
+function hideTodos() {
+  if (todoOverlay.value) {
+    todoDismissedRunId.value = todoOverlay.value.runId
+  }
+  showTodos.value = false
+}
 
 function runTitle(r: RunCardRecord): string {
   if (r.uiAction) return r.uiAction
@@ -1515,7 +1633,15 @@ onMounted(() => {
           <div class="mx-auto max-w-3xl">
             <div class="flex gap-4">
               <div class="flex-1">
-                 <AutoGrowTextarea
+                 <AttachmentPreviews
+                  v-if="extractWorkspaceImagePaths(composerText).length"
+                  class="mb-2"
+                  :workspace-path="workspacePath"
+                  :attachments="extractWorkspaceImagePaths(composerText)"
+                  :max="6"
+                />
+
+                <AutoGrowTextarea
                   v-model="composerText"
                   :min-rows="2"
                   :max-rows="12"
@@ -1523,35 +1649,34 @@ onMounted(() => {
                   :placeholder="targetMode === 'implementation' ? 'Type a message...' : 'Add notes for the next round... (optional)'"
                   :disabled="isRoleBusy(targetMode)"
                   @paste="onPasteComposer($event as ClipboardEvent)"
-                  @keydown.enter.prevent="() => { if (!isRoleBusy(targetMode) && canSendComposer()) sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e))) }"
+                  @keydown="onKeydownComposer"
                 />
                 
                 <!-- Composer Controls -->
                 <div class="mt-2 flex items-center justify-between">
                    <div class="flex items-center gap-2">
-                      <!-- Simplified Model Config (Icon Based?) -->
                       <select
                         v-model="targetConfig.modelChoice"
                         class="rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                         :disabled="modelsLoading"
                       >
-                        <option value="default">Model: Default</option>
-                        <option v-for="m in codexModels" :key="m.model" :value="m.model">
+                        <option value="default" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Model: Default</option>
+                        <option v-for="m in codexModels" :key="m.model" :value="m.model" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
                           {{ m.displayName }}
                         </option>
-                         <option value="custom">Model: Custom</option>
+                         <option value="custom" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Model: Custom</option>
                       </select>
 
                       <select
                         v-model="targetConfig.thinkingChoice"
                         class="rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:ring-0 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                       >
-                        <option value="default">Thinking: Default</option>
-                        <option value="minimal">Thinking: Minimal</option>
-                        <option value="low">Thinking: Low</option>
-                        <option value="medium">Thinking: Medium</option>
-                        <option value="high">Thinking: High</option>
-                        <option value="xhigh">Thinking: XHigh</option>
+                        <option value="default" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: Default</option>
+                        <option value="minimal" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: Minimal</option>
+                        <option value="low" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: Low</option>
+                        <option value="medium" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: Medium</option>
+                        <option value="high" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: High</option>
+                        <option value="xhigh" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: XHigh</option>
                       </select>
                    </div>
                    <button
@@ -1564,13 +1689,6 @@ onMounted(() => {
                     <span class="material-symbols-rounded text-[16px]">{{ targetMode === 'implementation' ? 'send' : 'play_arrow' }}</span>
                   </button>
                 </div>
-                 <AttachmentPreviews
-                  v-if="extractWorkspaceImagePaths(composerText).length"
-                  class="mt-2"
-                  :workspace-path="workspacePath"
-                  :attachments="extractWorkspaceImagePaths(composerText)"
-                  :max="6"
-                />
               </div>
             </div>
           </div>
@@ -1591,7 +1709,7 @@ onMounted(() => {
         <!-- Tabs -->
         <div class="flex border-b border-gray-200 px-2 dark:border-gray-800">
           <button
-            v-for="tab in (['plan', 'qna', 'tests', 'todos'] as const)"
+            v-for="tab in (['plan', 'qna', 'tests'] as const)"
             :key="tab"
             class="relative flex-1 px-4 py-3 text-xs font-bold transition-colors hover:text-gray-900 dark:hover:text-gray-100"
              :class="activeDocumentTab === tab ? 'text-brand-600 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400'"
@@ -1676,8 +1794,10 @@ onMounted(() => {
                                 <button
                                   v-for="opt in q.options"
                                   :key="opt.key"
-                                  class="text-left text-[10px] px-2 py-1.5 rounded border"
-                                  :class="inferredSelectedKey(q) === opt.key ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700'"
+                                  class="text-left text-[10px] px-2 py-1.5 rounded border transition-colors"
+                                  :class="(draftSelected[q.id] || inferredSelectedKey(q)) === opt.key 
+                                    ? 'bg-brand-600 text-white border-brand-600 shadow-sm' 
+                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-800'"
                                   @click="draftSelected = { ...draftSelected, [q.id]: opt.key }"
                                 >
                                   <span class="font-bold mr-1">{{ opt.key }}</span> {{ opt.text }}
@@ -1715,53 +1835,89 @@ onMounted(() => {
                        {{ round.id }} <span class="font-normal text-gray-500 ml-2">{{ new Date(round.startedAt).toLocaleDateString() }}</span>
                     </div>
                     <div class="p-3 space-y-3">
-                       <div v-for="t in testPlan.tests" :key="t.id" class="flex items-start justify-between gap-2 text-xs">
+                      <div v-for="t in testPlan.tests" :key="t.id" class="space-y-2">
+                        <div class="flex items-start justify-between gap-2 text-xs">
                           <div class="font-medium flex-1">{{ t.id }}: {{ t.title }}</div>
                           <select
-                            class="shrink-0 rounded border-gray-200 py-0.5 pl-2 pr-6 text-xs"
+                            class="shrink-0 rounded border-gray-200 py-0.5 pl-2 pr-6 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
                             :value="getResult(round, t.id).status"
                             @change="setTestStatus(round, t.id, ($event.target as HTMLSelectElement).value).catch(console.error)"
                           >
-                             <option value="not_run">Not Run</option>
-                             <option value="pass">Pass</option>
-                             <option value="fail">Fail</option>
-                             <option value="deferred">Deferred</option>
+                            <option value="not_run" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Not Run</option>
+                            <option value="pass" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Pass</option>
+                            <option value="fail" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Fail</option>
+                            <option value="deferred" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Deferred</option>
                           </select>
-                       </div>
+                        </div>
+
+                        <!-- Feedback/Notes -->
+                        <AutoGrowTextarea
+                          v-model="getResult(round, t.id).feedback[0].text"
+                          class="w-full text-[10px] p-2 rounded bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800"
+                          placeholder="Add feedback / results..."
+                          @blur="saveTestPlan"
+                          @paste="onPasteTestFeedback($event as ClipboardEvent, round, t.id)"
+                        />
+                        <AttachmentPreviews
+                          v-if="getResult(round, t.id).feedback[0].attachments.length"
+                          :workspace-path="workspacePath"
+                          :attachments="getResult(round, t.id).feedback[0].attachments"
+                          size-class="h-12 w-12"
+                          :max="4"
+                        />
+                      </div>
                     </div>
                  </div>
              </div>
              <div v-else class="text-xs text-gray-500">No test plan loaded.</div>
            </div>
 
-           <!-- Todos Tab -->
-           <div v-if="activeDocumentTab === 'todos'" class="space-y-4">
-              <!-- Show aggregate todos from recent runs -->
-              <!-- TODO: Needs logic to aggregate or finding the "master" todo list -->
-              <div class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
-                 <div class="text-[10px] uppercase font-black tracking-wider text-gray-500 mb-2">
-                    Latest Todo List
-                    <span v-if="todoOverlay?.runId" class="normal-case font-normal ml-1 opacity-70">(Run {{ todoOverlay.runId }})</span>
-                 </div>
-
-                 <div v-if="todoOverlay && todoOverlay.items.length" class="space-y-1">
-                    <div 
-                      v-for="(item, idx) in todoOverlay.items" 
-                      :key="idx" 
-                      class="flex items-start gap-2 text-xs py-1"
-                      :class="item.completed ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-gray-200'"
-                    >
-                       <span class="material-symbols-rounded text-[14px]">{{ item.completed ? 'check_box' : 'check_box_outline_blank' }}</span>
-                       <span>{{ item.text }}</span>
-                    </div>
-                 </div>
-                 <div v-else class="text-xs text-gray-500 italic">
-                    No active todo list found in recent runs.
-                 </div>
-              </div>
-           </div>
+           <!-- Removed Todos Tab (moved to overlay) -->
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Todo Overlay -->
+  <div
+    v-if="showTodos"
+    class="fixed z-50 flex w-80 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-stone-900"
+    :style="{
+      left: todoPosition.x + 'px',
+      top: todoPosition.y + 'px',
+      maxHeight: '50vh'
+    }"
+  >
+    <div 
+      class="flex cursor-move items-center justify-between border-b border-gray-100 bg-gray-50/50 px-3 py-2 dark:border-gray-800 dark:bg-stone-800/50"
+      @mousedown="startDraggingTodo"
+    >
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-rounded text-[20px] text-brand-600 dark:text-brand-400">checklist</span>
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Todo List</span>
+      </div>
+      <button 
+        class="rounded p-1 hover:bg-gray-200 dark:hover:bg-stone-700"
+        @click="hideTodos"
+      >
+        <span class="material-symbols-rounded text-[20px] text-gray-400">close</span>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4 shrink-0">
+       <div v-if="todoOverlay && todoOverlay.items.length" class="space-y-1">
+          <div 
+            v-for="(item, idx) in todoOverlay.items" 
+            :key="idx" 
+            class="flex items-start gap-2 text-xs py-1"
+            :class="item.completed ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-gray-200'"
+          >
+             <span class="material-symbols-rounded text-[14px]">{{ item.completed ? 'check_box' : 'check_box_outline_blank' }}</span>
+             <span>{{ item.text }}</span>
+          </div>
+       </div>
+       <div v-else class="text-xs text-gray-500 italic p-3">
+          No active todo list found.
+       </div>
     </div>
   </div>
   
