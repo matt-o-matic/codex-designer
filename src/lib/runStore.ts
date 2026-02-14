@@ -60,72 +60,82 @@ let unsubscribe: (() => void) | null = null
 
 const MAX_EVENTS = 100
 
-type DiffRefreshState = {
-  timer: ReturnType<typeof setTimeout> | null
-  inFlight: boolean
-  pending: boolean
-  missingHandlerRetries: number
+function isFileChangeKind(raw: unknown): WorkspaceDiffFile['status'] {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (!value) return 'unknown'
+  if (value === 'add' || value === 'added' || value === 'create' || value === 'created') return 'added'
+  if (value === 'delete' || value === 'deleted' || value === 'remove' || value === 'removed') return 'deleted'
+  if (value === 'modify' || value === 'modified' || value === 'update' || value === 'updated') return 'modified'
+  if (value === 'rename' || value === 'renamed' || value === 'move' || value === 'moved') return 'renamed'
+  if (value === 'copy' || value === 'copied') return 'copied'
+  return 'unknown'
 }
 
-const diffRefreshByRun = new Map<string, DiffRefreshState>()
-
-function getDiffRefreshState(runId: string): DiffRefreshState {
-  const existing = diffRefreshByRun.get(runId)
-  if (existing) return existing
-  const next: DiffRefreshState = { timer: null, inFlight: false, pending: false, missingHandlerRetries: 0 }
-  diffRefreshByRun.set(runId, next)
-  return next
+function asFiniteDiffNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.trunc(value) : null
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
-function scheduleWorkspaceDiffRefresh(runId: string, delayMs = 650) {
-  const api = window.codexDesigner
-  if (!api?.getGitWorktreeSummary) return
-  const rec = runs[runId]
-  if (!rec?.workspacePath) return
+export function buildWorkspaceDiffFromEvents(events: unknown[]): WorkspaceDiffSummary | null {
+  const pathToFile = new Map<string, WorkspaceDiffFile>()
 
-  const st = getDiffRefreshState(runId)
-  st.pending = true
-  if (st.timer) return
+  for (const evt of events ?? []) {
+    if (!evt || typeof evt !== 'object') continue
+    const e = evt as any
+    const t = typeof e?.type === 'string' ? e.type : ''
+    const item = e?.item
 
-  st.timer = setTimeout(async () => {
-    st.timer = null
-    if (st.inFlight) return
+    if (
+      (t === 'item.started' || t === 'item.updated' || t === 'item.completed') &&
+      item &&
+      typeof item === 'object' &&
+      typeof item.type === 'string' &&
+      item.type === 'file_change'
+    ) {
+      const changes = Array.isArray(item.changes) ? item.changes : []
+      for (const change of changes) {
+        if (!change || typeof change !== 'object') continue
+        const c = change as any
+        const fromPath = String(c?.fromPath ?? c?.from ?? '').trim()
+        const toPath = String(c?.toPath ?? c?.path ?? c?.to ?? '').trim()
+        const status = isFileChangeKind(c?.kind ?? c?.changeType ?? item.status)
+        const additions = asFiniteDiffNumber(c?.additions ?? c?.insertions)
+        const deletions = asFiniteDiffNumber(c?.deletions ?? c?.deletions_count ?? c?.removed ?? c?.removals)
 
-    st.inFlight = true
-    st.pending = false
-    try {
-      const res = await api.getGitWorktreeSummary(rec.workspacePath!)
-      if (!runs[runId]) return
-      st.missingHandlerRetries = 0
-      runs[runId].workspaceDiff = {
-        isGitRepo: !!res?.isGitRepo,
-        updatedAtMs: Number(res?.updatedAtMs) || Date.now(),
-        files: Array.isArray(res?.files) ? (res.files as any) : [],
-        error: typeof res?.error === 'string' || res?.error === null ? (res.error as any) : null,
+        const pathLabel = toPath || fromPath
+        if (!pathLabel) continue
+
+        if (status === 'renamed' && fromPath && toPath) {
+          pathToFile.set(`${fromPath}->${toPath}`, {
+            path: `${fromPath} -> ${toPath}`,
+            status,
+            additions,
+            deletions,
+          })
+          continue
+        }
+
+        pathToFile.set(pathLabel, {
+          path: pathLabel,
+          status,
+          additions,
+          deletions,
+        })
       }
-    } catch (e) {
-      if (!runs[runId]) return
-      const msg = e instanceof Error ? e.message : String(e)
-      const missingHandler =
-        msg.includes("No handler registered for 'codex-designer:get-git-worktree-summary'") ||
-        (msg.includes('No handler registered') && msg.includes('get-git-worktree-summary'))
-
-      if (missingHandler && st.missingHandlerRetries < 3) {
-        st.missingHandlerRetries += 1
-        scheduleWorkspaceDiffRefresh(runId, 1250)
-      }
-
-      runs[runId].workspaceDiff = {
-        isGitRepo: false,
-        updatedAtMs: Date.now(),
-        files: [],
-        error: missingHandler ? 'Diff stats unavailable (restart the app to enable this).' : msg,
-      }
-    } finally {
-      st.inFlight = false
-      if (st.pending) scheduleWorkspaceDiffRefresh(runId, 250)
     }
-  }, Math.max(0, Math.floor(delayMs)))
+  }
+
+  if (!pathToFile.size) return null
+  return {
+    isGitRepo: true,
+    updatedAtMs: Date.now(),
+    files: Array.from(pathToFile.values()).sort((a, b) => a.path.localeCompare(b.path)),
+    error: null,
+  }
 }
 
 function ensureSubscribed() {
@@ -168,6 +178,7 @@ function ensureSubscribed() {
       if (runs[runId].events.length > MAX_EVENTS) {
         runs[runId].events.splice(0, runs[runId].events.length - MAX_EVENTS)
       }
+      runs[runId].workspaceDiff = buildWorkspaceDiffFromEvents(runs[runId].events)
 
       const evt = payload.event as any
       if (
@@ -179,10 +190,6 @@ function ensureSubscribed() {
 
         if (itemType === 'agent_message' && typeof evt.item.text === 'string') {
           runs[runId].finalResponse = evt.item.text
-        }
-
-        if (itemType === 'file_change' || (itemType === 'command_execution' && evt.type === 'item.completed')) {
-          scheduleWorkspaceDiffRefresh(runId)
         }
       }
 
@@ -234,15 +241,12 @@ function ensureSubscribed() {
         runs[runId].status = 'failed'
         runs[runId].error = evt.message ? String(evt.message) : 'Run failed'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
-        scheduleWorkspaceDiffRefresh(runId, 0)
       } else if (evt?.type === 'run.aborted') {
         runs[runId].status = 'aborted'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
-        scheduleWorkspaceDiffRefresh(runId, 0)
       } else if (evt?.type === 'run.completed') {
         if (runs[runId].status === 'running') runs[runId].status = 'completed'
         runs[runId].endedAt = runs[runId].endedAt ?? Date.now()
-        scheduleWorkspaceDiffRefresh(runId, 0)
       }
     }) ?? null
 }

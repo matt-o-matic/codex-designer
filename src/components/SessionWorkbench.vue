@@ -16,7 +16,12 @@ import {
   type QnaRoundV1,
   type QnaStateV1,
 } from '../lib/qnaState'
-import { useRunStore, type ModelReasoningEffort, type RunRecord } from '../lib/runStore'
+import {
+  buildWorkspaceDiffFromEvents,
+  useRunStore,
+  type ModelReasoningEffort,
+  type RunRecord,
+} from '../lib/runStore'
 import { createEmptyTestPlan, ensureRound, renderTestMarkdown, type TestPlan, type TestRound, type TestStatus } from '../lib/tests'
 import { useWorkbenchUi, type SessionMode } from '../lib/workbenchUi'
 import AutoGrowTextarea from './AutoGrowTextarea.vue'
@@ -73,7 +78,8 @@ const configs = ref<Record<SessionMode, ModeConfig>>({
 const dockTargetOverride = ref<'current' | SessionMode>('current')
 const targetMode = computed<SessionMode>(() => (dockTargetOverride.value === 'current' ? mode.value : dockTargetOverride.value))
 const targetConfig = computed(() => configs.value[targetMode.value])
-const activeDocumentTab = ref<'plan' | 'qna' | 'tests'>('plan')
+type DocumentTab = 'plan' | 'qna' | 'tests' | 'implementation'
+const activeDocumentTab = ref<DocumentTab>('plan')
 const showTodos = ref(false)
 
 /* -------------------------------------------------------------------------
@@ -170,17 +176,75 @@ function thinkingValue(cfg: ModeConfig): ModelReasoningEffort | '' {
 const codexModels = ref<CodexModelInfo[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref<string | null>(null)
+let refreshModelsRequest = 0
+let modelsLoadedAt = 0
+const MODEL_LIST_STALE_MS = 60_000
 
 async function refreshModels(forceRefresh = false) {
+  const requestId = ++refreshModelsRequest
+
+  if (modelsLoading.value && !forceRefresh) return
+  if (forceRefresh && modelsLoading.value) return
+
+  const previous = codexModels.value
   modelsLoading.value = true
   modelsError.value = null
+
   try {
-    codexModels.value = await listCodexModels({ forceRefresh })
+    const next = await listCodexModels({ forceRefresh })
+    if (requestId !== refreshModelsRequest) return
+    codexModels.value = next
+    modelsLoadedAt = Date.now()
+    reconcileModelChoicesWithCatalog()
   } catch (e) {
-    codexModels.value = []
+    if (requestId !== refreshModelsRequest) return
+    if (forceRefresh) {
+      codexModels.value = []
+      modelsLoadedAt = 0
+    } else {
+      codexModels.value = previous
+    }
     modelsError.value = e instanceof Error ? e.message : String(e)
+    reconcileModelChoicesWithCatalog()
   } finally {
-    modelsLoading.value = false
+    if (requestId === refreshModelsRequest) {
+      modelsLoading.value = false
+    }
+  }
+}
+
+function refreshModelsIfNeeded() {
+  if (modelsLoading.value) return
+  if (!codexModels.value.length) {
+    void refreshModels(true)
+    return
+  }
+  const now = Date.now()
+  if (now - modelsLoadedAt >= MODEL_LIST_STALE_MS) {
+    void refreshModels(true)
+  }
+}
+
+function reconcileModelChoicesWithCatalog() {
+  const available = new Set(codexModels.value.map((m) => m.model))
+  if (!available.size) return
+
+  for (const cfg of Object.values(configs.value)) {
+    if (cfg.modelChoice === 'default') continue
+
+    if (cfg.modelChoice === 'custom') {
+      const custom = cfg.modelCustom.trim()
+      if (custom && available.has(custom)) {
+        cfg.modelChoice = custom
+        cfg.modelCustom = ''
+      }
+      continue
+    }
+
+    if (available.has(cfg.modelChoice)) continue
+    const prev = cfg.modelChoice
+    cfg.modelChoice = 'custom'
+    cfg.modelCustom = prev
   }
 }
 
@@ -244,6 +308,8 @@ const qnaState = shallowRef<QnaStateV1 | null>(null)
 const qnaLocked = ref(false)
 const qnaPlanNotes = ref('')
 const qnaPlanNotesError = ref<string | null>(null)
+const implementationMarkdown = ref<string | null>(null)
+const implLoadError = ref<string | null>(null)
 
 const qnaRoundOpen = ref<Record<string, boolean>>({})
 const qnaEditOpen = ref<Record<string, boolean>>({})
@@ -309,6 +375,8 @@ async function loadArtifacts() {
   planLoadError.value = null
   qnaLoadError.value = null
   testLoadError.value = null
+  implLoadError.value = null
+  implementationMarkdown.value = null
   qnaLocked.value = false
 
   try {
@@ -378,6 +446,18 @@ async function loadArtifacts() {
   }
 
   try {
+    implementationMarkdown.value = await window.codexDesigner!.readTextFile(
+      props.workspacePath,
+      `docs/${props.featureSlug}.impl.md`
+    )
+  } catch (e) {
+    if (!String(e?.message ?? '').includes('ENOENT')) {
+      implLoadError.value = e instanceof Error ? e.message : String(e)
+    }
+    implementationMarkdown.value = null
+  }
+
+  try {
     const rawState = await window.codexDesigner!.readTextFile(props.workspacePath, `.codex-designer/cache/state.json`)
     const parsed = JSON.parse(rawState) as any
     const implThreadId = parsed?.features?.[props.featureSlug]?.implementationThreadId
@@ -399,6 +479,23 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('codex-designer:artifacts-updated', onArtifactsUpdated)
 })
+
+const hasImplementationArtifact = computed(() => implementationMarkdown.value !== null)
+const documentTabs = computed(() => {
+  const tabs: DocumentTab[] = ['plan', 'qna', 'tests']
+  if (hasImplementationArtifact.value) tabs.push('implementation')
+  return tabs
+})
+const implementationTabLabel = 'Implementation'
+
+watch(
+  () => hasImplementationArtifact.value,
+  (has) => {
+    if (!has && activeDocumentTab.value === 'implementation') {
+      activeDocumentTab.value = 'plan'
+    }
+  }
+)
 
 watch(
   () => [props.workspacePath, props.featureSlug],
@@ -847,6 +944,7 @@ function canSendComposer(): boolean {
 }
 
 async function sendComposer() {
+  refreshModelsIfNeeded()
   const text = String(composerText.value ?? '').trim()
   const role = targetMode.value
   if (isRoleBusy(role)) return
@@ -1271,7 +1369,7 @@ const mergedRuns = computed<RunCardRecord[]>(() => {
       uiUserMessage,
       input,
       inputImages,
-      workspaceDiff: null,
+      workspaceDiff: buildWorkspaceDiffFromEvents(log.events),
       meta: {
         profileId: meta.profileId ?? null,
         model: meta.model ?? null,
@@ -1441,7 +1539,7 @@ function abort(runId: string) {
 }
 
 onMounted(() => {
-  void refreshModels()
+  void refreshModels(true)
 })
 </script>
 
@@ -1659,7 +1757,7 @@ onMounted(() => {
                 />
                 
                 <!-- Composer Controls -->
-                <div class="mt-2 flex items-center justify-between">
+                    <div class="mt-2 flex items-center justify-between">
                    <div class="flex items-center gap-2">
                       <select
                         v-model="targetConfig.modelChoice"
@@ -1667,11 +1765,22 @@ onMounted(() => {
                         :disabled="modelsLoading"
                       >
                         <option value="default" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Model: Default</option>
+                        <option v-if="!modelsLoading && !codexModels.length" value="" disabled class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+                          No models loaded
+                        </option>
                         <option v-for="m in codexModels" :key="m.model" :value="m.model" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
                           {{ m.displayName }}
                         </option>
                          <option value="custom" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Model: Custom</option>
                       </select>
+
+                      <input
+                        v-if="targetConfig.modelChoice === 'custom'"
+                        v-model="targetConfig.modelCustom"
+                        type="text"
+                        class="w-48 rounded-lg border border-gray-200 bg-transparent px-2 py-1 text-xs text-gray-500 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:text-gray-200"
+                        placeholder="Custom model"
+                      />
 
                       <select
                         v-model="targetConfig.thinkingChoice"
@@ -1684,6 +1793,20 @@ onMounted(() => {
                         <option value="high" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: High</option>
                         <option value="xhigh" class="bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">Thinking: XHigh</option>
                       </select>
+
+                      <button
+                        class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-bold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        type="button"
+                        :disabled="modelsLoading"
+                        title="Refresh models from Codex"
+                        aria-label="Refresh models from Codex"
+                        @click="refreshModels(true)"
+                      >
+                        <span class="material-symbols-rounded text-[16px]">refresh</span>
+                      </button>
+                      <div v-if="modelsError" class="text-[10px] font-medium text-red-600 dark:text-red-400">
+                        {{ modelsError }}
+                      </div>
                    </div>
                    <button
                     class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
@@ -1715,13 +1838,13 @@ onMounted(() => {
         <!-- Tabs -->
         <div class="flex border-b border-gray-200 px-2 dark:border-gray-800">
           <button
-            v-for="tab in (['plan', 'qna', 'tests'] as const)"
+            v-for="tab in documentTabs"
             :key="tab"
             class="relative flex-1 px-4 py-3 text-xs font-bold transition-colors hover:text-gray-900 dark:hover:text-gray-100"
              :class="activeDocumentTab === tab ? 'text-brand-600 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400'"
             @click="activeDocumentTab = tab"
           >
-            {{ tab === 'qna' ? 'Q&A' : tab.charAt(0).toUpperCase() + tab.slice(1) }}
+            {{ tab === 'qna' ? 'Q&A' : tab === 'implementation' ? implementationTabLabel : tab.charAt(0).toUpperCase() + tab.slice(1) }}
             <span
               v-if="activeDocumentTab === tab"
               class="absolute inset-x-0 bottom-0 h-0.5 bg-brand-600 dark:bg-brand-400"
@@ -1876,6 +1999,21 @@ onMounted(() => {
                  </div>
              </div>
              <div v-else class="text-xs text-gray-500">No test plan loaded.</div>
+           </div>
+
+           <!-- Implementation Notes Tab -->
+           <div v-if="activeDocumentTab === 'implementation'" class="space-y-4">
+             <div v-if="implLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+               {{ implLoadError }}
+             </div>
+             <div v-else-if="!implementationMarkdown" class="text-xs text-gray-500">
+               Implementation notes file not found yet (`docs/${featureSlug}.impl.md`).
+             </div>
+             <MarkdownViewer
+               v-else
+               class="prose prose-sm prose-gray dark:prose-invert max-w-none"
+               :markdown="implementationMarkdown"
+             />
            </div>
 
            <!-- Removed Todos Tab (moved to overlay) -->
