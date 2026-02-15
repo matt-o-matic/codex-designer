@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useAppState } from '../lib/appState'
 import { useNewFeatureUi } from '../lib/newFeatureUi'
-import { useRunStore } from '../lib/runStore'
+import { type ModelReasoningEffort, useRunStore } from '../lib/runStore'
 import { useWorkbenchUi } from '../lib/workbenchUi'
 import { parseLenientJson } from '../lib/json'
 import { buildPlanningCreatePrompt } from '../lib/prompts'
@@ -21,6 +21,38 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const submitRunId = ref<string | null>(null)
 const submitRun = computed(() => getRun(submitRunId.value))
+const newFeatureModel = ref('')
+const newFeatureThinking = ref<ModelReasoningEffort | ''>('')
+
+type WorkspaceRunDefaults = { model?: string; modelReasoningEffort?: ModelReasoningEffort | '' }
+type WorkspaceRunDefaultsByRole = {
+  planning?: WorkspaceRunDefaults
+  implementation?: WorkspaceRunDefaults
+  testing?: WorkspaceRunDefaults
+  generic?: WorkspaceRunDefaults
+  newWork?: WorkspaceRunDefaults
+}
+const allowedThinking: Array<ModelReasoningEffort> = ['minimal', 'low', 'medium', 'high', 'xhigh']
+
+function normalizeThinking(value: unknown): ModelReasoningEffort | '' {
+  const raw = String(value ?? '').trim()
+  if (allowedThinking.includes(raw as ModelReasoningEffort)) return raw as ModelReasoningEffort
+  return ''
+}
+
+async function loadNewFeatureRunDefaults(workspacePath: string) {
+  newFeatureModel.value = ''
+  newFeatureThinking.value = ''
+  try {
+    const defaults = (await window.codexDesigner?.getWorkspaceRunDefaults?.(workspacePath)) as WorkspaceRunDefaultsByRole | null
+    const applied = defaults?.newWork ?? defaults?.planning
+    if (!applied) return
+    newFeatureModel.value = String(applied.model ?? '').trim()
+    newFeatureThinking.value = normalizeThinking(applied.modelReasoningEffort)
+  } catch {
+    // ignore
+  }
+}
 
 const QNA_OPTION_SCHEMA = {
   type: 'object',
@@ -183,6 +215,8 @@ async function createFeature() {
       featureSlug: nextSlug,
       role: 'planning',
       profileId: 'yolo',
+      model: newFeatureModel.value || undefined,
+      modelReasoningEffort: newFeatureThinking.value || undefined,
       input: prompt,
       outputSchema: PLAN_CREATE_SCHEMA,
       uiAction: 'planning-create',
@@ -231,6 +265,8 @@ watch(
     submitting.value = false
     slug.value = ''
     brief.value = ''
+    const workspacePath = String(newFeatureWorkspacePath.value ?? '').trim()
+    await loadNewFeatureRunDefaults(workspacePath)
     await nextTick()
     slugInput.value?.focus()
   }

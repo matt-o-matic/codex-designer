@@ -451,8 +451,9 @@ async function loadArtifacts() {
       `docs/${props.featureSlug}.impl.md`
     )
   } catch (e) {
-    if (!String(e?.message ?? '').includes('ENOENT')) {
-      implLoadError.value = e instanceof Error ? e.message : String(e)
+    const errorMessage = e instanceof Error ? e.message : String(e)
+    if (!errorMessage.includes('ENOENT')) {
+      implLoadError.value = errorMessage
     }
     implementationMarkdown.value = null
   }
