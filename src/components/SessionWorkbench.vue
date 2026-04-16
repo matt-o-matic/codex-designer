@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { parseLenientJson } from '../lib/json'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
+import { assertValidPlanningPlanMarkdown } from '../lib/planning'
 import {
   buildImplementationFollowupPrompt,
   buildImplementationPrompt,
@@ -767,6 +768,7 @@ async function applyPlanningNextRoundOutput(runId: string) {
   if (!parsedRes) throw new Error('Failed to parse structured output.')
   const parsed = parsedRes.value as { planMarkdown: string; qnaRound: QnaRoundV1 }
   const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
+  assertValidPlanningPlanMarkdown(plan, props.featureSlug)
   const qnaRound = parsed.qnaRound
 
   const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`)

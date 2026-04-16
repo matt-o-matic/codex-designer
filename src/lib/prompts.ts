@@ -1,6 +1,12 @@
+import { PLAN_REQUIRED_SECTIONS, PLANNING_REVIEW_TOPICS } from './planning'
+
 function renderAttachments(relPaths: string[]): string {
   if (!relPaths.length) return ''
   return `\n\n## Attachments\n\n${relPaths.map((p) => `- ${p}`).join('\n')}\n`
+}
+
+function renderBulletList(items: readonly string[], prefix = '- '): string {
+  return items.map((item) => `${prefix}${item}`).join('\n')
 }
 
 function appendHouseStyle(prompt: string, houseStyleMarkdown?: string): string {
@@ -36,15 +42,22 @@ You must produce:
 - Title at top: \`# ${slug} — Plan\`
 - Include a link/pointer to the Q&A doc: \`Related Q&A: \\\`docs/${slug}.qna.md\\\`\`
 - Include sections (use \`##\` headings):
-  - Problem
-  - Goals
-  - Non-goals
-  - Assumptions
-  - Decisions (may be empty initially)
-  - Design (high-level; include UI + data + integration notes as applicable)
-  - Implementation Tasks (ordered checklist)
-  - Validation (manual test checklist)
-- Be practical and implementation-ready, but keep unknowns clearly marked as open questions.
+${renderBulletList(PLAN_REQUIRED_SECTIONS, '  - ')}
+- \`## Planning Review\` must include these exact \`###\` subsections in this order:
+${renderBulletList(PLANNING_REVIEW_TOPICS, '  - ')}
+- Every Planning Review subsection must do one of these:
+  - capture a concrete decision, implication, risk, or follow-up
+  - explicitly state that the topic was considered and is not applicable, already obvious, or intentionally deferred
+- Do not silently omit a Planning Review topic, even when no action is needed.
+- Keep the rough sequencing intact:
+  - Scope and Intent first
+  - Dependency Mapping and Data Shape and Ownership before deeper technical planning
+  - Error Topology and Test Contract after the success path is clear
+- Be practical and implementation-ready:
+  - \`## Design\` should include UI + data + integration notes as applicable
+  - \`## Implementation Tasks\` should be an ordered checklist
+  - \`## Validation\` should be a manual test checklist
+  - \`## Open Questions\` should say \`None.\` if there are no remaining open questions
 
 ### Q&A JSON requirements
 - \`qna.version\` must be \`1\`
@@ -53,7 +66,14 @@ You must produce:
 - \`qna.rounds\` must contain exactly one round: Round 1
   - \`round.id\`: \`round-1\`
   - \`round.title\`: \`Round 1\`
-  - \`round.questions\`: ~6–10 high-signal questions unless the brief is extremely underspecified
+  - \`round.questions\`: ask as many high-signal questions as needed in this round; there is no fixed question-count cap
+- Round 1 questions should prioritize unresolved topics in this order:
+  - Scope and Intent
+  - Dependency Mapping
+  - Data Shape and Ownership
+  - Then the remaining Planning Review topics
+- Skip questions when the answer is already obvious from the brief or the topic is clearly not applicable.
+- It is valid for \`round.questions\` to be empty only if the brief already supports an implementation-ready plan and every Planning Review subsection is filled in accordingly.
 - Each question must include:
   - \`id\`: stable, deterministic (e.g. \`r1-q1\`, \`r1-q2\`, ...)
   - \`prompt\`: the question text
@@ -76,21 +96,13 @@ export function buildPlanningNextRoundPrompt(args: {
   const nextRound = Math.max(1, Math.floor(args.nextRoundNumber || 1))
   const additionalNotes = String(args.additionalNotes ?? '').trim()
 
-  const wrapUpMode = nextRound >= 6
-  const finalStretch = nextRound >= 9
-  const hardStop = nextRound >= 12
-
-  const followUpCap = hardStop ? 0 : finalStretch ? 1 : wrapUpMode ? 3 : 8
-
-  const lateStageGuidance = wrapUpMode
+  const lateStageGuidance = nextRound >= 8
     ? `
 ## Wrap-up guidance (Round ${nextRound})
-- This Q&A is already deep. Strongly prefer making reasonable inferences from prior rounds + the updated plan.
-- Ask ONLY truly blocking questions that would materially change implementation.
-- Maximum follow-ups this round: ${followUpCap}.
-- Do NOT ask repeats or near-repeats of earlier questions. If the answer is already implied, make an assumption and record it in the plan.
-- If there are no remaining high-signal ambiguities, return \`qnaRound.questions: []\` and set \`qnaRound.title\` to \`Round ${nextRound} (complete)\`.
-${hardStop ? '- Hard stop: do not ask more questions; finalize the plan and return an empty questions list.\n' : ''}`
+- You are in the late rounds. Consolidate aggressively and prefer resolving the remaining ambiguity in this round instead of spreading it across more shallow rounds.
+- There is still no per-round question cap. Ask as many questions as needed to close the remaining gaps.
+- Aim to finish planning within 10 rounds total when reasonable, but do NOT force completion if material ambiguity remains.
+- Do NOT ask repeats or near-repeats of earlier questions. If the answer is already implied, make an assumption and record it in the plan.`
     : ''
 
   const notesBlock = additionalNotes
@@ -113,16 +125,30 @@ Return ONLY valid JSON matching the provided output schema (no markdown fences, 
 - Generate ONLY the next set of follow-up questions as a single round object to append to \`docs/${slug}.qna.json\`.
 ${notesBlock}
 
+## Plan structure requirements
+- \`planMarkdown\` must keep these \`##\` sections:
+${renderBulletList(PLAN_REQUIRED_SECTIONS, '  - ')}
+- \`## Planning Review\` must include these exact \`###\` subsections in this order:
+${renderBulletList(PLANNING_REVIEW_TOPICS, '  - ')}
+- Every Planning Review subsection must either record a concrete conclusion/follow-up or explicitly note that it was considered and is not applicable, already obvious, or intentionally deferred.
+
 ## Follow-up rules (deterministic)
 - Ask only high-signal questions that are still genuinely ambiguous.
 - Do not ask "obvious" questions that can be inferred from the brief, plan, or prior rounds.
 - Never ask duplicates of earlier questions (including reworded duplicates).
 - Prefer documenting assumptions/decisions in the plan over asking another question.
+- Prefer unresolved topics in this order:
+  - Scope and Intent
+  - Dependency Mapping
+  - Data Shape and Ownership
+  - Then the remaining Planning Review topics
 - If "Additional notes" is present, prioritize clarifying those items before anything else.
 - If "Additional notes" is present and any item is ambiguous, ask at least 1 follow-up question this round.
-- Target follow-up count this round: 0–${followUpCap}. Zero is allowed when planning is complete.
+- There is no artificial cap on questions in this round. Ask as many as needed, but batch related ambiguities together instead of creating more rounds than necessary.
+- Aim to finish planning in 10 rounds or fewer when reasonable, but do not force completion just to hit that target.
 - Each question MUST include 3–6 multiple-choice options and a recommended default.
 - Do not rewrite or duplicate earlier rounds.
+- Return \`qnaRound.questions: []\` only when every Planning Review subsection is present in \`planMarkdown\` and all remaining material ambiguities have either been resolved or deliberately accepted as documented assumptions.
 ${lateStageGuidance}
 
 ## Q&A round JSON requirements

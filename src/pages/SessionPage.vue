@@ -3,6 +3,7 @@ import { computed, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppState } from '../lib/appState'
 import { parseLenientJson } from '../lib/json'
+import { assertValidPlanningPlanMarkdown } from '../lib/planning'
 import { parseQnaMarkdown } from '../lib/qna'
 import { listCodexModels, type CodexModelInfo } from '../lib/models'
 import {
@@ -587,6 +588,7 @@ async function applyPlanningCreateOutput(runId: string, workspacePath: string, f
   const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
   const qnaState = normalizeQnaStateV1(parsed.qna).state
   const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n'))
+  assertValidPlanningPlanMarkdown(plan, featureSlug)
   const qnaMd = renderQnaMarkdownFromState(qnaState)
   await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\n')
   await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.md`, qnaMd)
@@ -603,6 +605,7 @@ async function applyPlanningNextRoundOutput(runId: string, workspacePath: string
   if (!parsedRes) throw new Error('Failed to parse structured output.')
   const parsed = parsedRes.value as { planMarkdown: string; qnaRound: QnaRoundV1 }
   const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n'))
+  assertValidPlanningPlanMarkdown(plan, featureSlug)
   const qnaRound = parsed.qnaRound
 
   const raw = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.qna.json`)

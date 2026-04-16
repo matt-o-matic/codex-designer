@@ -5,6 +5,7 @@ import { useNewFeatureUi } from '../lib/newFeatureUi'
 import { type ModelReasoningEffort, useRunStore } from '../lib/runStore'
 import { useWorkbenchUi } from '../lib/workbenchUi'
 import { parseLenientJson } from '../lib/json'
+import { assertValidPlanningPlanMarkdown } from '../lib/planning'
 import { buildPlanningCreatePrompt } from '../lib/prompts'
 import { createEmptyQnaStateV1, normalizeQnaStateV1, renderQnaMarkdownFromState, type QnaStateV1 } from '../lib/qnaState'
 
@@ -182,7 +183,14 @@ async function createFeature() {
 
     // 1. Create stub artifacts immediately
     const stubQnaState: QnaStateV1 = createEmptyQnaStateV1(nextSlug)
-    const stubPlan = '## Initial Plan\n\nCodex is generating the initial plan and Q&A...'
+    const stubPlan = `# ${nextSlug} — Plan
+
+Related Q&A: \`docs/${nextSlug}.qna.md\`
+
+## Initial Plan
+
+Codex is generating the initial plan and Q&A...
+`
     const stubQnaMd = renderQnaMarkdownFromState(stubQnaState)
 
     await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(stubQnaState, null, 2) + '\n')
@@ -232,6 +240,7 @@ async function createFeature() {
       const parsed = parsedRes.value as { planMarkdown: string; qna: QnaStateV1 }
       const qnaState = normalizeQnaStateV1(parsed.qna).state
       const plan = ensureTrailingNewline(String(parsed.planMarkdown ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
+      assertValidPlanningPlanMarkdown(plan, nextSlug)
       const qnaMd = renderQnaMarkdownFromState(qnaState)
 
       await window.codexDesigner!.writeTextFile(workspacePath, `docs/${nextSlug}.qna.json`, JSON.stringify(qnaState, null, 2) + '\n')
