@@ -77,8 +77,10 @@ ${renderBulletList(PLANNING_REVIEW_TOPICS, '  - ')}
 - Each question must include:
   - \`id\`: stable, deterministic (e.g. \`r1-q1\`, \`r1-q2\`, ...)
   - \`prompt\`: the question text
-  - \`options\`: 3–6 options with keys A–F and short, scannable text
-  - \`recommendedKey\`: must match one of the option keys
+  - \`options\`: 4–7 options total:
+    - 3–6 normal options with keys A–F
+    - plus a final option with key \`NONE\` and text \`None of these / other (explain in notes)\` (must be last)
+  - \`recommendedKey\`: must match one of the option keys; must not be \`NONE\` unless it is the only option
   - \`answers\`: empty array (no answers yet)
 - Exactly one option must have \`recommended: true\` (the recommended one).
 `
@@ -132,6 +134,11 @@ ${renderBulletList(PLAN_REQUIRED_SECTIONS, '  - ')}
 ${renderBulletList(PLANNING_REVIEW_TOPICS, '  - ')}
 - Every Planning Review subsection must either record a concrete conclusion/follow-up or explicitly note that it was considered and is not applicable, already obvious, or intentionally deferred.
 
+## Interpreting answers (important)
+- Each answer contains \`selectedKey\` (a quick tag) and \`notes\` (authoritative requirements/clarifications).
+- Notes may override the selectedKey. If they conflict, treat notes as the true requirement.
+- If \`selectedKey\` is \`NONE\`, rely primarily on notes to infer intent.
+
 ## Follow-up rules (deterministic)
 - Ask only high-signal questions that are still genuinely ambiguous.
 - Do not ask "obvious" questions that can be inferred from the brief, plan, or prior rounds.
@@ -146,7 +153,10 @@ ${renderBulletList(PLANNING_REVIEW_TOPICS, '  - ')}
 - If "Additional notes" is present and any item is ambiguous, ask at least 1 follow-up question this round.
 - There is no artificial cap on questions in this round. Ask as many as needed, but batch related ambiguities together instead of creating more rounds than necessary.
 - Aim to finish planning in 10 rounds or fewer when reasonable, but do not force completion just to hit that target.
-- Each question MUST include 3–6 multiple-choice options and a recommended default.
+- Each question MUST include:
+  - 3–6 normal multiple-choice options (keys A–F)
+  - plus a final \`NONE\` option: \`NONE) None of these / other (explain in notes)\`
+  - a recommended default that is not \`NONE\` when other options exist
 - Do not rewrite or duplicate earlier rounds.
 - Return \`qnaRound.questions: []\` only when every Planning Review subsection is present in \`planMarkdown\` and all remaining material ambiguities have either been resolved or deliberately accepted as documented assumptions.
 ${lateStageGuidance}
@@ -159,7 +169,7 @@ ${lateStageGuidance}
 - Each question must include:
   - \`id\`: stable, deterministic (e.g. \`r${nextRound}-q1\`, \`r${nextRound}-q2\`, ...)
   - \`prompt\`
-  - \`options\` (3–6 items)
+  - \`options\` (4–7 items total; 3–6 normal options + final \`NONE\` option)
   - \`recommendedKey\`
   - \`answers\`: empty array
 - Exactly one option must have \`recommended: true\` (the recommended one).

@@ -327,7 +327,7 @@ const activeSessionUsage = computed<UsageSummary | null>(() => {
                 </button>
               </div>
 
-              <div class="px-2 pb-2">
+              <div v-if="isWorkspaceExpanded(w.path) || w.forceExpanded" class="px-2 pb-2">
                 <div class="flex items-center gap-2">
                   <button
                     class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-[11px] font-black text-gray-800 transition-colors hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"

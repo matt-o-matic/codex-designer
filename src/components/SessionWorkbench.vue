@@ -87,25 +87,44 @@ const showTodos = ref(false)
    Scroll Management (Chat / Left Pane)
    ------------------------------------------------------------------------- */
 const scrollContainer = ref<HTMLDivElement | null>(null)
+const pinnedToBottom = ref(true)
 const showScrollBottom = ref(false)
+
+const PIN_THRESHOLD_PX = 24
+const SHOW_SCROLL_BUTTON_THRESHOLD_PX = 80
 
 function onScroll() {
   const el = scrollContainer.value
   if (!el) return
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-  showScrollBottom.value = dist > 50
+  pinnedToBottom.value = dist <= PIN_THRESHOLD_PX
+  showScrollBottom.value = dist > SHOW_SCROLL_BUTTON_THRESHOLD_PX
 }
 
-function scrollToBottom() {
+async function keepPinnedAtBottom() {
+  if (!pinnedToBottom.value) return
+  await nextTick()
   const el = scrollContainer.value
   if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
+  requestAnimationFrame(() => {
+    if (!pinnedToBottom.value) return
+    const el2 = scrollContainer.value
+    if (!el2) return
+    el2.scrollTo({ top: el2.scrollHeight, behavior: 'auto' })
+  })
+}
+
+function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
+  const el = scrollContainer.value
+  if (!el) return
+  pinnedToBottom.value = true
+  el.scrollTo({ top: el.scrollHeight, behavior })
 }
 
 watch(mode, async () => {
-  await nextTick()
-  scrollToBottom()
-  // Immediate check for scroll position to update arrow visibility
+  pinnedToBottom.value = true
+  await keepPinnedAtBottom()
   onScroll()
 })
 
@@ -284,8 +303,11 @@ type WorkspaceRunDefaults = { model?: string; modelReasoningEffort?: ModelReason
 type WorkspaceRunDefaultsByRole = { planning?: WorkspaceRunDefaults; implementation?: WorkspaceRunDefaults; testing?: WorkspaceRunDefaults }
 
 async function loadWorkspaceRunDefaults() {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  if (!workspacePath) return
   try {
-    const defaults = (await window.codexDesigner?.getWorkspaceRunDefaults?.(props.workspacePath)) as WorkspaceRunDefaultsByRole | null
+    const defaults = (await window.codexDesigner?.getWorkspaceRunDefaults?.(workspacePath)) as WorkspaceRunDefaultsByRole | null
+    if (String(props.workspacePath ?? '').trim() !== workspacePath) return
     if (!defaults) return
     applyModelChoiceFromValue(defaults.planning?.model, configs.value.planning)
     applyThinkingChoiceFromValue(defaults.planning?.modelReasoningEffort, configs.value.planning)
@@ -306,11 +328,14 @@ const planLoadError = ref<string | null>(null)
 const qnaMarkdown = ref('')
 const qnaLoadError = ref<string | null>(null)
 const qnaState = shallowRef<QnaStateV1 | null>(null)
-const qnaLocked = ref(false)
 const qnaPlanNotes = ref('')
 const qnaPlanNotesError = ref<string | null>(null)
 const implementationMarkdown = ref<string | null>(null)
 const implLoadError = ref<string | null>(null)
+const implArtifactExistsByKey = ref<Record<string, boolean>>({})
+
+let artifactsLoadSeq = 0
+let runLogsLoadSeq = 0
 
 const qnaRoundOpen = ref<Record<string, boolean>>({})
 const qnaEditOpen = ref<Record<string, boolean>>({})
@@ -362,115 +387,143 @@ function inputWithImages(
   return [{ type: 'text', text }, ...uniq.map((p) => ({ type: 'local_image' as const, path: p }))]
 }
 
-async function loadHouseStyle() {
+async function loadHouseStyle(workspacePath = props.workspacePath) {
+  const p = String(workspacePath ?? '').trim()
+  if (!p) {
+    houseStyleMarkdown.value = ''
+    return
+  }
   try {
-    houseStyleMarkdown.value = await window.codexDesigner!.readTextFile(props.workspacePath, '.codex-designer/share/house-style.md')
+    houseStyleMarkdown.value = await window.codexDesigner!.readTextFile(p, '.codex-designer/share/house-style.md')
   } catch {
     houseStyleMarkdown.value = ''
   }
 }
 
 async function loadArtifacts() {
-  if (!props.workspacePath || !props.featureSlug) return
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  if (!workspacePath || !featureSlug) return
+  const artifactsKey = `${workspacePath}::${featureSlug}`
+
+  const seq = ++artifactsLoadSeq
   artifactsLoading.value = true
   planLoadError.value = null
   qnaLoadError.value = null
   testLoadError.value = null
   implLoadError.value = null
   implementationMarkdown.value = null
-  qnaLocked.value = false
 
   try {
-    planMarkdown.value = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.plan.md`)
-  } catch (e) {
-    planMarkdown.value = ''
-    planLoadError.value = e instanceof Error ? e.message : String(e)
-  }
+    let nextPlanMarkdown = ''
+    let nextPlanLoadError: string | null = null
+    let nextQnaMarkdown = ''
+    let nextQnaLoadError: string | null = null
+    let nextQnaState: QnaStateV1 | null = null
+    let nextTestLoadError: string | null = null
+    let nextImplementationMarkdown: string | null = null
+    let nextImplLoadError: string | null = null
+    let nextImplExists = false
 
-  let loadedQna: QnaStateV1 | null = null
-  try {
-    const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`)
-    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
-    const parsedRes = parseLenientJson(raw)
-    const needsRewrite = !!parsedRes && parsedRes.jsonText !== rawTrimmed
-    const parsed = parseQnaStateJson(raw)
-    if (!parsed) throw new Error('Invalid Q&A JSON (expected version: 1).')
-    const norm = normalizeQnaStateV1(parsed)
-    loadedQna = norm.state
-    if (norm.changed || needsRewrite) {
-      await window.codexDesigner!.writeTextFile(
-        props.workspacePath,
-        `docs/${props.featureSlug}.qna.json`,
-        JSON.stringify(loadedQna, null, 2) + '\n'
-      )
-    }
-  } catch (e) {
-    loadedQna = null
-    qnaLoadError.value = e instanceof Error ? e.message : String(e)
-  }
-
-  if (loadedQna) {
     try {
-      qnaMarkdown.value = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`)
+      nextPlanMarkdown = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.plan.md`)
+    } catch (e) {
+      nextPlanMarkdown = ''
+      nextPlanLoadError = e instanceof Error ? e.message : String(e)
+    }
+
+    let loadedQna: QnaStateV1 | null = null
+    try {
+      const raw = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.qna.json`)
+      const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+      const parsedRes = parseLenientJson(raw)
+      const needsRewrite = !!parsedRes && parsedRes.jsonText !== rawTrimmed
+      const parsed = parseQnaStateJson(raw)
+      if (!parsed) throw new Error('Invalid Q&A JSON (expected version: 1).')
+      const norm = normalizeQnaStateV1(parsed)
+      loadedQna = norm.state
+      if (norm.changed || needsRewrite) {
+        await window.codexDesigner!.writeTextFile(
+          workspacePath,
+          `docs/${featureSlug}.qna.json`,
+          JSON.stringify(loadedQna, null, 2) + '\n'
+        )
+      }
+    } catch (e) {
+      loadedQna = null
+      nextQnaLoadError = e instanceof Error ? e.message : String(e)
+    }
+
+    if (loadedQna) {
+      try {
+        nextQnaMarkdown = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.qna.md`)
+      } catch {
+        nextQnaMarkdown = renderQnaMarkdownFromState(loadedQna)
+        await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.md`, nextQnaMarkdown)
+      }
+      nextQnaState = loadedQna
+    } else {
+      nextQnaMarkdown = ''
+      nextQnaState = null
+    }
+
+    let testNeedsRewrite = false
+    let nextTestPlan: TestPlan | null = null
+    try {
+      const raw = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.test.json`)
+      const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
+      const parsed = parseLenientJson(raw)
+      if (!parsed) throw new Error('Invalid test plan JSON.')
+      testNeedsRewrite = parsed.jsonText !== rawTrimmed
+      nextTestPlan = parsed.value as TestPlan
     } catch {
-      qnaMarkdown.value = renderQnaMarkdownFromState(loadedQna)
-      await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, qnaMarkdown.value)
+      nextTestPlan = createEmptyTestPlan(featureSlug)
+      nextTestLoadError = null
     }
-  } else {
-    qnaMarkdown.value = ''
-  }
-
-  qnaState.value = loadedQna
-  qnaPlanNotes.value = String(loadedQna?.notes ?? '')
-
-  let testNeedsRewrite = false
-  try {
-    const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.test.json`)
-    const rawTrimmed = String(raw ?? '').trim().replace(/^\uFEFF/, '')
-    const parsed = parseLenientJson(raw)
-    if (!parsed) throw new Error('Invalid test plan JSON.')
-    testNeedsRewrite = parsed.jsonText !== rawTrimmed
-    testPlan.value = parsed.value as TestPlan
-  } catch {
-    testPlan.value = createEmptyTestPlan(props.featureSlug)
-    testLoadError.value = null
-  }
-  if (testPlan.value) {
-    ensureRound(testPlan.value)
-    if (testNeedsRewrite) {
-      await window.codexDesigner!.writeTextFile(
-        props.workspacePath,
-        `docs/${props.featureSlug}.test.json`,
-        JSON.stringify(testPlan.value, null, 2) + '\n'
-      )
+    if (nextTestPlan) {
+      ensureRound(nextTestPlan)
+      if (testNeedsRewrite) {
+        await window.codexDesigner!.writeTextFile(
+          workspacePath,
+          `docs/${featureSlug}.test.json`,
+          JSON.stringify(nextTestPlan, null, 2) + '\n'
+        )
+      }
     }
-  }
 
-  try {
-    implementationMarkdown.value = await window.codexDesigner!.readTextFile(
-      props.workspacePath,
-      `docs/${props.featureSlug}.impl.md`
-    )
-  } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e)
-    if (!errorMessage.includes('ENOENT')) {
-      implLoadError.value = errorMessage
+    try {
+      nextImplementationMarkdown = await window.codexDesigner!.readTextFile(workspacePath, `docs/${featureSlug}.impl.md`)
+      nextImplExists = true
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e)
+      if (!errorMessage.includes('ENOENT')) {
+        nextImplLoadError = errorMessage
+        nextImplExists = true
+      }
+      nextImplementationMarkdown = null
     }
-    implementationMarkdown.value = null
+
+    await loadHouseStyle(workspacePath)
+
+    if (seq !== artifactsLoadSeq) return
+
+    planMarkdown.value = nextPlanMarkdown
+    planLoadError.value = nextPlanLoadError
+
+    qnaMarkdown.value = nextQnaMarkdown
+    qnaLoadError.value = nextQnaLoadError
+    qnaState.value = nextQnaState
+    qnaPlanNotes.value = String(nextQnaState?.notes ?? '')
+
+    testPlan.value = nextTestPlan
+    testLoadError.value = nextTestLoadError
+
+    implArtifactExistsByKey.value = { ...implArtifactExistsByKey.value, [artifactsKey]: nextImplExists }
+    implementationMarkdown.value = nextImplementationMarkdown
+    implLoadError.value = nextImplLoadError
+  } finally {
+    if (seq === artifactsLoadSeq) artifactsLoading.value = false
   }
-
-  try {
-    const rawState = await window.codexDesigner!.readTextFile(props.workspacePath, `.codex-designer/cache/state.json`)
-    const parsed = JSON.parse(rawState) as any
-    const implThreadId = parsed?.features?.[props.featureSlug]?.implementationThreadId
-    qnaLocked.value = typeof implThreadId === 'string' && implThreadId.trim().length > 0
-  } catch {
-    qnaLocked.value = false
-  }
-
-  await loadHouseStyle()
-
-  artifactsLoading.value = false
 }
 
 // Allow external triggers to reload artifacts (e.g. background creation completing)
@@ -482,7 +535,14 @@ onUnmounted(() => {
   window.removeEventListener('codex-designer:artifacts-updated', onArtifactsUpdated)
 })
 
-const hasImplementationArtifact = computed(() => implementationMarkdown.value !== null)
+const hasImplementationArtifact = computed(() => {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  if (!workspacePath || !featureSlug) return false
+  const key = `${workspacePath}::${featureSlug}`
+  return implArtifactExistsByKey.value[key] === true
+})
+const qnaWriteLocked = computed(() => hasImplementationArtifact.value)
 const documentTabs = computed(() => {
   const tabs: DocumentTab[] = ['plan', 'qna', 'tests']
   if (hasImplementationArtifact.value) tabs.push('implementation')
@@ -580,7 +640,7 @@ function toggleRound(id: string) {
 }
 
 function toggleQuestionEdit(q: QnaQuestionV1) {
-  if (qnaLocked.value) return
+  if (qnaWriteLocked.value) return
   qnaEditOpen.value = { ...qnaEditOpen.value, [q.id]: !qnaEditOpen.value[q.id] }
   if (!qnaEditOpen.value[q.id]) {
     // reset drafts when closing
@@ -590,27 +650,35 @@ function toggleQuestionEdit(q: QnaQuestionV1) {
   }
 }
 
-async function saveQnaPlanNotes() {
-  if (!qnaState.value) return
-  if (qnaLocked.value) return
+async function saveQnaPlanNotes(ctx?: { workspacePath: string; featureSlug: string }): Promise<{ state: QnaStateV1; markdown: string } | null> {
+  const workspacePath = String(ctx?.workspacePath ?? props.workspacePath ?? '').trim()
+  const featureSlug = String(ctx?.featureSlug ?? props.featureSlug ?? '').trim()
+  if (!qnaState.value) return null
+  if (qnaWriteLocked.value) return null
   const nextNotes = String(qnaPlanNotes.value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
   const curNotes = String(qnaState.value.notes ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
-  if (nextNotes === curNotes) return
+  if (nextNotes === curNotes) return null
 
   const nextState: QnaStateV1 = structuredClone(qnaState.value)
   nextState.notes = nextNotes
   nextState.updatedAt = new Date().toISOString()
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
   const md = renderQnaMarkdownFromState(nextState)
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, md)
-  qnaState.value = nextState
-  qnaMarkdown.value = md
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.md`, md)
+
+  if (props.workspacePath === workspacePath && props.featureSlug === featureSlug) {
+    qnaState.value = nextState
+    qnaMarkdown.value = md
+  }
+  return { state: nextState, markdown: md }
 }
 
 async function saveQnaAnswer(q: QnaQuestionV1) {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
   if (!qnaState.value) return
-  if (qnaLocked.value) return
+  if (qnaWriteLocked.value) return
 
   const selectedKey = inferredSelectedKey(q)
   const notes = String(inferredNotes(q) ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd()
@@ -634,9 +702,11 @@ async function saveQnaAnswer(q: QnaQuestionV1) {
     }
   }
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.json`, JSON.stringify(nextState, null, 2) + '\n')
   const md = renderQnaMarkdownFromState(nextState)
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, md)
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.qna.md`, md)
+
+  if (props.workspacePath !== workspacePath || props.featureSlug !== featureSlug) return
   qnaState.value = nextState
   qnaMarkdown.value = md
 
@@ -660,12 +730,16 @@ async function setTestStatus(round: TestRound, testId: string, status: string) {
   await saveTestPlan()
 }
 
-async function saveTestPlan() {
+async function saveTestPlan(ctx?: { workspacePath: string; featureSlug: string }) {
+  const workspacePath = String(ctx?.workspacePath ?? props.workspacePath ?? '').trim()
+  const featureSlug = String(ctx?.featureSlug ?? props.featureSlug ?? '').trim()
   if (!testPlan.value) return
-  const json = JSON.stringify(testPlan.value, null, 2) + '\n'
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.test.json`, json)
-  const md = renderTestMarkdown(testPlan.value)
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.test.md`, md)
+  const plan = structuredClone(testPlan.value)
+  ensureRound(plan)
+  const json = JSON.stringify(plan, null, 2) + '\n'
+  const md = renderTestMarkdown(plan)
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.test.json`, json)
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.test.md`, md)
 }
 
 async function startTestingRound() {
@@ -759,7 +833,7 @@ const PLAN_NEXT_ROUND_SCHEMA = {
 
 const LONG_RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000
 
-async function applyPlanningNextRoundOutput(runId: string) {
+async function applyPlanningNextRoundOutput(runId: string, ctx: { workspacePath: string; featureSlug: string }) {
   const rec = await waitForRunDone(runId)
   if (rec.status !== 'completed') throw new Error(rec.error ?? 'Planning run failed.')
   if (!rec.finalResponse) throw new Error('No structured output received.')
@@ -771,7 +845,7 @@ async function applyPlanningNextRoundOutput(runId: string) {
   assertValidPlanningPlanMarkdown(plan, props.featureSlug)
   const qnaRound = parsed.qnaRound
 
-  const raw = await window.codexDesigner!.readTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`)
+  const raw = await window.codexDesigner!.readTextFile(ctx.workspacePath, `docs/${ctx.featureSlug}.qna.json`)
   const existing = parseQnaStateJson(raw)
   if (!existing) throw new Error('Failed to read existing Q&A JSON state.')
 
@@ -784,44 +858,54 @@ async function applyPlanningNextRoundOutput(runId: string) {
   const normalized = normalizeQnaStateV1(nextState).state
   const qnaMd = renderQnaMarkdownFromState(normalized)
 
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.json`, JSON.stringify(normalized, null, 2) + '\n')
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.qna.md`, qnaMd)
-  await window.codexDesigner!.writeTextFile(props.workspacePath, `docs/${props.featureSlug}.plan.md`, plan)
+  await window.codexDesigner!.writeTextFile(ctx.workspacePath, `docs/${ctx.featureSlug}.qna.json`, JSON.stringify(normalized, null, 2) + '\n')
+  await window.codexDesigner!.writeTextFile(ctx.workspacePath, `docs/${ctx.featureSlug}.qna.md`, qnaMd)
+  await window.codexDesigner!.writeTextFile(ctx.workspacePath, `docs/${ctx.featureSlug}.plan.md`, plan)
 
-  await loadArtifacts()
+  if (props.workspacePath === ctx.workspacePath && props.featureSlug === ctx.featureSlug) {
+    await loadArtifacts()
+  }
 }
 
-async function runNextPlanningRound(notes?: string) {
-  if (qnaLocked.value) return
+async function runNextPlanningRound(notes?: string, opts?: { force?: boolean }) {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  const ctx = { workspacePath, featureSlug }
+  if (!workspacePath || !featureSlug) return
+
+  if (qnaWriteLocked.value) return
   if (isRoleBusy('planning')) return
   if (!qnaState.value) return
-  if (qnaComplete.value) return
+  if (qnaComplete.value && !opts?.force) return
+  const qnaPlanNotesSnapshot = String(qnaPlanNotes.value ?? '')
+  const qnaMarkdownSnapshot = String(qnaMarkdown.value ?? '')
+  const nextRoundNumber = (qnaState.value?.rounds?.length ?? 0) + 1
 
-  await loadHouseStyle()
+  await loadHouseStyle(workspacePath)
 
   qnaPlanNotesError.value = null
+  let savedNotes: { state: QnaStateV1; markdown: string } | null = null
   try {
-    await saveQnaPlanNotes()
+    savedNotes = await saveQnaPlanNotes(ctx)
   } catch (e) {
     qnaPlanNotesError.value = e instanceof Error ? e.message : String(e)
     return
   }
 
-  const nextRoundNumber = (qnaState.value?.rounds?.length ?? 0) + 1
-  const images = extractWorkspaceImagePaths(qnaMarkdown.value)
-
-  const combinedNotes = [qnaPlanNotes.value, notes].filter(Boolean).join('\n\n')
+  const qnaMdForImages = savedNotes?.markdown ?? qnaMarkdownSnapshot
+  const combinedNotes = [qnaPlanNotesSnapshot, notes].filter((n) => String(n ?? '').trim().length > 0).join('\n\n')
+  const images = extractWorkspaceImagePaths(`${qnaMdForImages}\n\n${combinedNotes}`)
 
   const prompt = buildPlanningNextRoundPrompt({
-    featureSlug: props.featureSlug,
+    featureSlug,
     nextRoundNumber,
     additionalNotes: combinedNotes,
     houseStyleMarkdown: houseStyleMarkdown.value,
   })
 
   const runId = await startRun({
-    workspacePath: props.workspacePath,
-    featureSlug: props.featureSlug,
+    workspacePath,
+    featureSlug,
     role: 'planning',
     profileId: configs.value.planning.profileId,
     model: modelValue(configs.value.planning) || undefined,
@@ -833,7 +917,7 @@ async function runNextPlanningRound(notes?: string) {
   })
 
   configs.value.planning.oneShotNetwork = false
-  void applyPlanningNextRoundOutput(runId).catch((e) => {
+  void applyPlanningNextRoundOutput(runId, ctx).catch((e) => {
     console.error(e)
     showToast(e instanceof Error ? e.message : String(e))
   })
@@ -864,18 +948,20 @@ const TEST_GENERATION_SCHEMA = {
 } as const
 
 async function generateTests() {
-  if (!props.workspacePath || !props.featureSlug) return
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  if (!workspacePath || !featureSlug) return
   if (isRoleBusy('testing')) return
 
   const runId = await startRun({
-    workspacePath: props.workspacePath,
-    featureSlug: props.featureSlug,
+    workspacePath,
+    featureSlug,
     role: 'testing',
     profileId: configs.value.testing.profileId,
     model: modelValue(configs.value.testing) || undefined,
     modelReasoningEffort: (thinkingValue(configs.value.testing) as ModelReasoningEffort | '') || undefined,
     oneShotNetwork: configs.value.testing.profileId === 'careful' ? configs.value.testing.oneShotNetwork : undefined,
-    input: `Generate a set of key manual tests for the feature "${props.featureSlug}". Use docs/${props.featureSlug}.plan.md and docs/${props.featureSlug}.qna.md as the source of truth. Output JSON that matches the provided schema.`,
+    input: `Generate a set of key manual tests for the feature "${featureSlug}". Use docs/${featureSlug}.plan.md and docs/${featureSlug}.qna.md as the source of truth. Output JSON that matches the provided schema.`,
     outputSchema: TEST_GENERATION_SCHEMA,
     uiAction: 'testing-generate-tests',
   })
@@ -889,7 +975,7 @@ async function generateTests() {
   const parsedRes = parseLenientJson(rec.finalResponse)
   if (!parsedRes) throw new Error('Failed to parse structured output.')
   const parsed = parsedRes.value as { tests: any[] }
-  const plan = createEmptyTestPlan(props.featureSlug)
+  const plan = createEmptyTestPlan(featureSlug)
   plan.generatedAt = new Date().toISOString()
   plan.tests = (parsed.tests ?? []).map((t, idx) => ({
     id: String(t.id || `T${idx + 1}`),
@@ -900,20 +986,31 @@ async function generateTests() {
     tags: Array.isArray(t.tags) ? t.tags.map((s: any) => String(s)) : undefined,
   }))
   ensureRound(plan)
-  testPlan.value = plan
-  await saveTestPlan()
+  const json = JSON.stringify(plan, null, 2) + '\n'
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.test.json`, json)
+  const md = renderTestMarkdown(plan)
+  await window.codexDesigner!.writeTextFile(workspacePath, `docs/${featureSlug}.test.md`, md)
+
+  if (props.workspacePath === workspacePath && props.featureSlug === featureSlug) {
+    testPlan.value = plan
+  }
   showToast('Tests generated')
 }
 
 async function runImplementation() {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  if (!workspacePath || !featureSlug) return
   if (isRoleBusy('implementation')) return
-  await loadHouseStyle()
-  const images = extractWorkspaceImagePaths(`${planMarkdown.value}\n\n${qnaMarkdown.value}`)
-  const prompt = buildImplementationPrompt({ featureSlug: props.featureSlug, houseStyleMarkdown: houseStyleMarkdown.value })
+  const planSnapshot = String(planMarkdown.value ?? '')
+  const qnaSnapshot = String(qnaMarkdown.value ?? '')
+  await loadHouseStyle(workspacePath)
+  const images = extractWorkspaceImagePaths(`${planSnapshot}\n\n${qnaSnapshot}`)
+  const prompt = buildImplementationPrompt({ featureSlug, houseStyleMarkdown: houseStyleMarkdown.value })
 
   const runId = await startRun({
-    workspacePath: props.workspacePath,
-    featureSlug: props.featureSlug,
+    workspacePath,
+    featureSlug,
     role: 'implementation',
     profileId: configs.value.implementation.profileId,
     model: modelValue(configs.value.implementation) || undefined,
@@ -933,16 +1030,18 @@ const composerText = ref('')
 
 function canSendComposer(): boolean {
   const role = targetMode.value
+  const text = String(composerText.value ?? '').trim()
   if (isRoleBusy(role)) return false
 
   if (role === 'planning') {
-    return !qnaLocked.value && !!qnaState.value && !qnaComplete.value
+    if (qnaWriteLocked.value) return false
+    if (!qnaState.value) return false
+    if (qnaComplete.value) return text.length > 0
+    return true
   }
   if (role === 'testing') {
     return !!testPlan.value
   }
-
-  const text = String(composerText.value ?? '').trim()
   return text.length > 0
 }
 
@@ -950,10 +1049,14 @@ async function sendComposer() {
   refreshModelsIfNeeded()
   const text = String(composerText.value ?? '').trim()
   const role = targetMode.value
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
   if (isRoleBusy(role)) return
 
   if (role === 'planning') {
-    await runNextPlanningRound(text)
+    const force = qnaComplete.value
+    if (force && !text.length) return
+    await runNextPlanningRound(text, { force })
     composerText.value = ''
     composerExpanded.value = false
     return
@@ -970,25 +1073,25 @@ async function sendComposer() {
 
   if (!text.length) return
 
-  await loadHouseStyle()
+  await loadHouseStyle(workspacePath)
 
   const cfg = configs.value[role]
   const attachments = extractWorkspaceImagePaths(text)
   const prompt =
     role === 'implementation'
       ? buildImplementationFollowupPrompt({
-          featureSlug: props.featureSlug,
+          featureSlug,
           message: text,
           attachments,
           houseStyleMarkdown: houseStyleMarkdown.value,
         })
-      : `Continue the existing ${role} work for \`${props.featureSlug}\`.\n\n${text}`
+      : `Continue the existing ${role} work for \`${featureSlug}\`.\n\n${text}`
 
   const images = extractWorkspaceImagePaths(prompt)
 
   await startRun({
-    workspacePath: props.workspacePath,
-    featureSlug: props.featureSlug,
+    workspacePath,
+    featureSlug,
     role,
     profileId: cfg.profileId,
     model: modelValue(cfg) || undefined,
@@ -1118,7 +1221,9 @@ function pastePlainTextIntoTarget(e: ClipboardEvent, text: string) {
   el.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string) => void) {
+async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string) => void | Promise<void>) {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
   const dt = e.clipboardData
   if (!dt) return
 
@@ -1143,13 +1248,13 @@ async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string)
     }
 
     const saved = await window.codexDesigner!.saveAttachment({
-      workspacePath: props.workspacePath,
-      featureSlug: props.featureSlug,
+      workspacePath,
+      featureSlug,
       ext: normalized.ext,
       bytesBase64: normalized.bytesBase64,
     })
 
-    afterSave(saved.relPath)
+    await afterSave(saved.relPath)
     showToast('Image attached')
     return
   }
@@ -1161,13 +1266,13 @@ async function attachPastedImage(e: ClipboardEvent, afterSave: (relPath: string)
   if (!normalized) return
 
   const saved = await window.codexDesigner!.saveAttachment({
-    workspacePath: props.workspacePath,
-    featureSlug: props.featureSlug,
+    workspacePath,
+    featureSlug,
     ext: normalized.ext,
     bytesBase64: normalized.bytesBase64,
   })
 
-  afterSave(saved.relPath)
+  await afterSave(saved.relPath)
   showToast('Image attached')
 }
 
@@ -1193,7 +1298,7 @@ async function onPasteComposer(e: ClipboardEvent) {
 }
 
 async function onPasteQnaNotes(e: ClipboardEvent, q: QnaQuestionV1) {
-  if (qnaLocked.value) return
+  if (qnaWriteLocked.value) return
   await attachPastedImage(e, (rel) => {
     qnaEditOpen.value = { ...qnaEditOpen.value, [q.id]: true }
     
@@ -1218,12 +1323,14 @@ async function onPasteQnaNotes(e: ClipboardEvent, q: QnaQuestionV1) {
 }
 
 async function onPasteTestFeedback(e: ClipboardEvent, round: TestRound, testId: string) {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
   await attachPastedImage(e, async (rel) => {
     const res = getResult(round, testId)
     if (!res.feedback[0].attachments.includes(rel)) {
       res.feedback[0].attachments.push(rel)
     }
-    await saveTestPlan()
+    await saveTestPlan({ workspacePath, featureSlug })
   })
 }
 
@@ -1262,11 +1369,16 @@ function extractFinalResponse(events: unknown[], fallback: string | undefined): 
 }
 
 async function loadRunLogs() {
+  const workspacePath = String(props.workspacePath ?? '').trim()
+  const featureSlug = String(props.featureSlug ?? '').trim()
+  if (!workspacePath || !featureSlug) return
+
+  const seq = ++runLogsLoadSeq
   runLogsLoading.value = true
   try {
     const metas = (await window.codexDesigner?.listRunLogs?.({
-      workspacePath: props.workspacePath,
-      featureSlug: props.featureSlug,
+      workspacePath,
+      featureSlug,
     })) as RunLogMeta[] | undefined
 
     const list = Array.isArray(metas) ? metas : []
@@ -1285,9 +1397,11 @@ async function loadRunLogs() {
       })
     )
 
-    runLogsById.value = map
+    if (seq === runLogsLoadSeq) {
+      runLogsById.value = map
+    }
   } finally {
-    runLogsLoading.value = false
+    if (seq === runLogsLoadSeq) runLogsLoading.value = false
   }
 }
 
@@ -1399,21 +1513,24 @@ const runsByMode = computed(() => {
   return by
 })
 
-// Watch active runs to auto-scroll if near bottom
+const activityStreamSignal = computed(() => {
+  const list = runsByMode.value[mode.value] ?? []
+  return list.map((r) => {
+    const evts = r.events ?? []
+    const last = evts.length ? evts[evts.length - 1] : null
+    return [r.runId, r.status, r.finalResponse.length, last]
+  })
+})
+
+// Keep the activity pane pinned while streaming updates arrive.
 watch(
-  () => runsByMode.value[mode.value].length,
+  activityStreamSignal,
   async () => {
-    // Only scroll if we were already relatively close to bottom or it's a new run
-    await nextTick()
-    if (!scrollContainer.value) return
-    const el = scrollContainer.value
-    // Simple logic: just scroll to bottom on new run cards for now
-    // A more complex logic would check if user is reading up history
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-    if (dist < 400) {
-      scrollToBottom()
-    }
-  }
+    if (!pinnedToBottom.value) return
+    await keepPinnedAtBottom()
+    onScroll()
+  },
+  { flush: 'post' }
 )
 
 type TodoOverlayItem = { text: string; completed: boolean }
@@ -1574,7 +1691,7 @@ onMounted(() => {
       <div class="flex flex-1 flex-col overflow-hidden relative">
         <div
           ref="scrollContainer"
-          class="flex-1 overflow-y-auto p-4 scroll-smooth"
+          class="flex-1 overflow-y-auto p-4"
           @scroll="onScroll"
         >
           <div class="mx-auto max-w-3xl space-y-6">
@@ -1587,13 +1704,16 @@ onMounted(() => {
                   <button
                     class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
                     type="button"
-                    :disabled="qnaLocked || isRoleBusy('planning') || qnaComplete"
+                    :disabled="qnaWriteLocked || isRoleBusy('planning') || qnaComplete"
                     @click="runNextPlanningRound()"
                   >
                     <span class="material-symbols-rounded text-[16px]">play_arrow</span>
                     Next Round
                   </button>
                 </div>
+              </div>
+              <div v-if="qnaComplete && !qnaWriteLocked" class="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                Planning is complete. Type a note below and click Reopen Q&amp;A to generate another round.
               </div>
             </div>
 
@@ -1731,7 +1851,7 @@ onMounted(() => {
           <button
             v-if="showScrollBottom"
             class="absolute left-1/2 -top-10 -translate-x-1/2 rounded-full border border-gray-200 bg-white p-2 shadow-lg transition-all hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
-            @click="scrollToBottom"
+            @click="scrollToBottom()"
             aria-label="Scroll to bottom"
           >
             <span class="material-symbols-rounded block text-[20px] text-brand-600 dark:text-brand-400">arrow_downward</span>
@@ -1753,7 +1873,13 @@ onMounted(() => {
                   :min-rows="2"
                   :max-rows="12"
                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none ring-0 placeholder:text-gray-400 focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:placeholder:text-gray-500 dark:focus:border-brand-500 dark:focus:bg-gray-950"
-                  :placeholder="targetMode === 'implementation' ? 'Type a message...' : 'Add notes for the next round... (optional)'"
+                  :placeholder="
+                    targetMode === 'implementation'
+                      ? 'Type a message...'
+                      : targetMode === 'planning' && qnaComplete
+                        ? 'Type to reopen Q&A...'
+                        : 'Add notes for the next round... (optional)'
+                  "
                   :disabled="isRoleBusy(targetMode)"
                   @paste="onPasteComposer($event as ClipboardEvent)"
                   @keydown="onKeydownComposer"
@@ -1811,13 +1937,19 @@ onMounted(() => {
                         {{ modelsError }}
                       </div>
                    </div>
-                   <button
+                  <button
                     class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
                     type="button"
                     :disabled="!canSendComposer() || isRoleBusy(targetMode)"
                     @click="sendComposer().catch((e) => showToast(e instanceof Error ? e.message : String(e)))"
                   >
-                    {{ targetMode === 'implementation' ? 'Send' : 'Next Round' }}
+                    {{
+                      targetMode === 'implementation'
+                        ? 'Send'
+                        : targetMode === 'planning' && qnaComplete
+                          ? 'Reopen Q&A'
+                          : 'Next Round'
+                    }}
                     <span class="material-symbols-rounded text-[16px]">{{ targetMode === 'implementation' ? 'send' : 'play_arrow' }}</span>
                   </button>
                 </div>
@@ -1873,6 +2005,13 @@ onMounted(() => {
                {{ qnaLoadError }}
              </div>
 
+             <div
+               v-else-if="qnaWriteLocked"
+               class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+             >
+               Q&amp;A is read-only because <span class="font-mono">docs/{{ featureSlug }}.impl.md</span> exists.
+             </div>
+
               <!-- Q&A Rounds List -->
               <div v-if="qnaState" class="space-y-3">
                  <!-- Note editor component reused here -->
@@ -1884,12 +2023,12 @@ onMounted(() => {
                       :max-rows="6"
                       class="w-full text-xs bg-transparent outline-none resize-none"
                       placeholder="Add high-level implementation notes..."
-                      :disabled="qnaLocked"
+                      :disabled="qnaWriteLocked"
                     />
                     <div class="mt-2 flex justify-end">
                        <button
                         class="text-[10px] font-bold text-brand-600 hover:text-brand-700 disabled:opacity-50"
-                         :disabled="qnaLocked"
+                         :disabled="qnaWriteLocked"
                          @click="saveQnaPlanNotes().then(() => showToast('Notes saved'))"
                        >
                          Save Notes
@@ -1907,14 +2046,69 @@ onMounted(() => {
                     </div>
                     
                     <div v-if="qnaRoundOpen[round.id]" class="p-3 space-y-3">
-                        <div v-for="q in round.questions" :key="q.id" class="space-y-2">
-                           <div class="text-xs font-medium text-gray-800 dark:text-gray-200">{{ q.prompt }}</div>
-                           <!-- Minimal view of answer -->
-                           <div class="text-xs pl-2 border-l-2 border-brand-500 text-gray-600 dark:text-gray-400">
-                              {{ selectedOptionText(q, inferredSelectedKey(q)) || 'Not answered' }}
-                           </div>
-                           <button 
-                             class="text-[10px] text-brand-600 underline"
+                         <div v-for="q in round.questions" :key="q.id" class="space-y-2">
+                            <div class="text-xs font-medium text-gray-800 dark:text-gray-200">{{ q.prompt }}</div>
+                            <!-- Answer history -->
+                            <div class="text-xs pl-2 border-l-2 border-brand-500 text-gray-600 dark:text-gray-400 space-y-2">
+                              <template v-if="q.answers.length">
+                                <div class="space-y-1">
+                                  <div class="flex items-baseline justify-between gap-2">
+                                    <div class="min-w-0">
+                                      <span class="font-mono font-bold">{{ q.answers[q.answers.length - 1].selectedKey }}</span>
+                                      <span class="ml-1">{{ selectedOptionText(q, q.answers[q.answers.length - 1].selectedKey) }}</span>
+                                    </div>
+                                    <div class="shrink-0 text-[10px] text-gray-400">
+                                      {{ new Date(q.answers[q.answers.length - 1].createdAt).toLocaleString() }}
+                                    </div>
+                                  </div>
+                                  <div
+                                    v-if="String(q.answers[q.answers.length - 1].notes ?? '').trim().length"
+                                    class="whitespace-pre-wrap text-[11px] text-gray-600 dark:text-gray-400"
+                                  >
+                                    {{ q.answers[q.answers.length - 1].notes }}
+                                  </div>
+                                </div>
+
+                                <details v-if="q.answers.length > 1" class="mt-1">
+                                  <summary class="cursor-pointer text-[10px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                    Previous answers ({{ q.answers.length - 1 }})
+                                  </summary>
+                                  <div class="mt-2 space-y-2">
+                                    <div
+                                      v-for="a in q.answers.slice(0, -1).slice().reverse()"
+                                      :key="a.id"
+                                      class="rounded-lg border border-gray-200 bg-white/60 p-2 dark:border-gray-700 dark:bg-gray-900/60"
+                                    >
+                                      <div class="flex items-baseline justify-between gap-2">
+                                        <div class="min-w-0">
+                                          <span class="font-mono font-bold">{{ a.selectedKey }}</span>
+                                          <span class="ml-1">{{ selectedOptionText(q, a.selectedKey) }}</span>
+                                        </div>
+                                        <div class="shrink-0 text-[10px] text-gray-400">
+                                          {{ new Date(a.createdAt).toLocaleString() }}
+                                        </div>
+                                      </div>
+                                      <div
+                                        v-if="String(a.notes ?? '').trim().length"
+                                        class="mt-1 whitespace-pre-wrap text-[11px] text-gray-600 dark:text-gray-400"
+                                      >
+                                        {{ a.notes }}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </details>
+                              </template>
+                              <template v-else>
+                                <div class="italic text-gray-500">Not answered yet.</div>
+                                <div class="text-[10px] text-gray-500">
+                                  Recommended: <span class="font-mono font-bold">{{ q.recommendedKey }}</span> — {{ selectedOptionText(q, q.recommendedKey) }}
+                                </div>
+                              </template>
+                            </div>
+                            <button 
+                              class="text-[10px] text-brand-600 underline"
+                              :disabled="qnaWriteLocked"
+                              :class="qnaWriteLocked ? 'opacity-50 cursor-not-allowed' : ''"
                              @click="toggleQuestionEdit(q)"
                            >
                               {{ qnaEditOpen[q.id] ? 'Close Editor' : 'Edit Answer' }}
@@ -1930,6 +2124,7 @@ onMounted(() => {
                                   :class="(draftSelected[q.id] || inferredSelectedKey(q)) === opt.key 
                                     ? 'bg-brand-600 text-white border-brand-600 shadow-sm' 
                                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-800'"
+                                  :disabled="qnaWriteLocked"
                                   @click="draftSelected = { ...draftSelected, [q.id]: opt.key }"
                                 >
                                   <span class="font-bold mr-1">{{ opt.key }}</span> {{ opt.text }}
@@ -1939,10 +2134,13 @@ onMounted(() => {
                                 v-model="draftNotes[q.id]"
                                 class="w-full text-xs p-2 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
                                 placeholder="Notes..."
+                                :disabled="qnaWriteLocked"
                                 @paste="onPasteQnaNotes($event as ClipboardEvent, q)"
                               />
                               <button 
                                 class="w-full py-1 bg-brand-600 text-white rounded text-[10px] font-bold"
+                                :disabled="qnaWriteLocked"
+                                :class="qnaWriteLocked ? 'opacity-50 cursor-not-allowed' : ''"
                                 @click="saveQnaAnswer(q)"
                               >
                                 Save
@@ -1983,13 +2181,13 @@ onMounted(() => {
                         </div>
 
                         <!-- Feedback/Notes -->
-                        <AutoGrowTextarea
-                          v-model="getResult(round, t.id).feedback[0].text"
-                          class="w-full text-[10px] p-2 rounded bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800"
-                          placeholder="Add feedback / results..."
-                          @blur="saveTestPlan"
-                          @paste="onPasteTestFeedback($event as ClipboardEvent, round, t.id)"
-                        />
+                          <AutoGrowTextarea
+                            v-model="getResult(round, t.id).feedback[0].text"
+                            class="w-full text-[10px] p-2 rounded bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800"
+                            placeholder="Add feedback / results..."
+                            @blur="saveTestPlan()"
+                            @paste="onPasteTestFeedback($event as ClipboardEvent, round, t.id)"
+                          />
                         <AttachmentPreviews
                           v-if="getResult(round, t.id).feedback[0].attachments.length"
                           :workspace-path="workspacePath"
@@ -2005,16 +2203,16 @@ onMounted(() => {
            </div>
 
            <!-- Implementation Notes Tab -->
-           <div v-if="activeDocumentTab === 'implementation'" class="space-y-4">
-             <div v-if="implLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
-               {{ implLoadError }}
-             </div>
-             <div v-else-if="!implementationMarkdown" class="text-xs text-gray-500">
-               Implementation notes file not found yet (`docs/${featureSlug}.impl.md`).
-             </div>
-             <MarkdownViewer
-               v-else
-               class="prose prose-sm prose-gray dark:prose-invert max-w-none"
+            <div v-if="activeDocumentTab === 'implementation'" class="space-y-4">
+              <div v-if="implLoadError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                {{ implLoadError }}
+              </div>
+              <div v-else-if="implementationMarkdown === null" class="text-xs text-gray-500">
+                Implementation notes file not found yet (`docs/${featureSlug}.impl.md`).
+              </div>
+              <MarkdownViewer
+                v-else
+                class="prose prose-sm prose-gray dark:prose-invert max-w-none"
                :markdown="implementationMarkdown"
              />
            </div>

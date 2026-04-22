@@ -266,9 +266,9 @@ function diffStatusClass(status: WorkspaceDiffSummary['files'][number]['status']
             :started-at="startedAt"
             :ended-at="endedAt"
             :meta="meta"
-            :max-events="100"
+            :max-events="1000"
             :collapse-key="collapseKey"
-            :default-collapsed="true"
+            :default-collapsed="false"
           />
         </div>
       </details>

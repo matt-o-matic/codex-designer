@@ -231,6 +231,7 @@ export class CodexRunManager {
     const { pid } = await this.spawnCodex({
       args: codexArgs,
       prompt,
+      cwd: args.workspacePath,
       eventsFile,
       stderrFile,
       signal,
@@ -337,6 +338,7 @@ export class CodexRunManager {
   private async spawnCodex(args: {
     args: string[]
     prompt: string
+    cwd: string
     eventsFile: string
     stderrFile: string
     signal: AbortSignal | undefined
@@ -352,6 +354,7 @@ export class CodexRunManager {
       const env = buildCodexEnv()
       const detached = process.platform !== 'win32'
       const child = spawn(codexPath, args.args, {
+        cwd: args.cwd,
         env,
         detached,
         stdio: ['pipe', stdoutFd, stderrFd],

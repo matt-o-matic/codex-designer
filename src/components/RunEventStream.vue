@@ -36,11 +36,11 @@ const props = defineProps<{
   defaultCollapsed?: boolean
 }>()
 
-const maxEvents = computed(() => (props.maxEvents && props.maxEvents > 0 ? props.maxEvents : 100))
+const maxEvents = computed(() => (props.maxEvents && props.maxEvents > 0 ? props.maxEvents : 1000))
 const heightClass = computed(() => props.heightClass ?? 'h-[35vh] min-h-[120px]')
 
 const collapseKey = computed(() => props.collapseKey ?? 'codex-designer:run-stream-collapsed')
-const collapsed = ref(props.defaultCollapsed ?? true)
+const collapsed = ref(props.defaultCollapsed ?? false)
 
 const now = ref(Date.now())
 let ticker: ReturnType<typeof setInterval> | null = null
@@ -469,15 +469,23 @@ async function scrollToBottom() {
   const el = scroller.value
   if (!el) return
   el.scrollTop = el.scrollHeight
+  requestAnimationFrame(() => {
+    if (!pinnedToBottom.value) return
+    const el2 = scroller.value
+    if (!el2) return
+    el2.scrollTop = el2.scrollHeight
+  })
 }
 
 watch(
-  () => parsed.value.length,
+  () => (props.events?.length ? props.events[props.events.length - 1] : null),
   async () => {
     if (props.status !== 'running') return
+    if (collapsed.value) return
     if (!pinnedToBottom.value) return
     await scrollToBottom()
-  }
+  },
+  { flush: 'post' }
 )
 
 onMounted(() => {

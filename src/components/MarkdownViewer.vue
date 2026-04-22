@@ -21,6 +21,11 @@ const html = computed(() => {
 </template>
 
 <style scoped>
+.markdown {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .markdown :deep(h1),
 .markdown :deep(h2),
 .markdown :deep(h3) {

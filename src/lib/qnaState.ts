@@ -2,6 +2,9 @@ import { parseLenientJson } from './json'
 
 export type QnaStateVersion = 1
 
+const NONE_OPTION_KEY = 'NONE'
+const NONE_OPTION_TEXT = 'None of these / other (explain in notes)'
+
 export type QnaOptionV1 = {
   key: string
   text: string
@@ -83,9 +86,34 @@ export function normalizeQnaStateV1(input: QnaStateV1): { state: QnaStateV1; cha
       if (nextOpts.length !== (q.options?.length ?? 0)) changed = true
       q.options = nextOpts
 
-      const fallbackKey = q.options[0]?.key ?? 'A'
+      // Ensure NONE option exists, is unique, and is last.
+      const noneIdx = q.options.findIndex((o) => o.key === NONE_OPTION_KEY)
+      if (noneIdx === -1) {
+        q.options.push({ key: NONE_OPTION_KEY, text: NONE_OPTION_TEXT, recommended: false })
+        changed = true
+      } else {
+        const existing = q.options[noneIdx]
+        if (existing.text !== NONE_OPTION_TEXT) {
+          existing.text = NONE_OPTION_TEXT
+          changed = true
+        }
+        if (existing.recommended !== false) {
+          existing.recommended = false
+          changed = true
+        }
+        if (noneIdx !== q.options.length - 1) {
+          q.options = [...q.options.filter((o) => o.key !== NONE_OPTION_KEY), existing]
+          changed = true
+        }
+      }
+
+      const nonNone = q.options.filter((o) => o.key !== NONE_OPTION_KEY)
+      const fallbackKey = nonNone[0]?.key ?? q.options[0]?.key ?? 'A'
       const rec = String(q.recommendedKey ?? '').trim().toUpperCase()
       if (!rec || !q.options.some((o) => o.key === rec)) {
+        q.recommendedKey = fallbackKey
+        changed = true
+      } else if (rec === NONE_OPTION_KEY && nonNone.length > 0) {
         q.recommendedKey = fallbackKey
         changed = true
       } else {
@@ -164,6 +192,11 @@ export function renderQnaMarkdownFromState(state: QnaStateV1): string {
   lines.push(`# ${slug} — Q&A`)
   lines.push('')
   lines.push(`Related plan: \`docs/${slug}.plan.md\``)
+  lines.push('')
+  lines.push('## How answers work')
+  lines.push('')
+  lines.push('- The option key is a quick tag; notes are authoritative and may override it.')
+  lines.push(`- Select \`${NONE_OPTION_KEY}\` when none of the options fit; explain what you want in notes.`)
   lines.push('')
 
   const notes = normalizeLineEndings(state.notes ?? '').trimEnd()

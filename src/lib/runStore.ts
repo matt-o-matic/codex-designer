@@ -58,7 +58,7 @@ const runs = reactive<Record<string, RunRecord>>({})
 let subscribed = false
 let unsubscribe: (() => void) | null = null
 
-const MAX_EVENTS = 100
+const MAX_EVENTS = 1000
 
 function isFileChangeKind(raw: unknown): WorkspaceDiffFile['status'] {
   const value = String(raw ?? '').trim().toLowerCase()
